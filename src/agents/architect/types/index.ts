@@ -5,7 +5,7 @@ export interface ArchitectConfig {
 }
 
 export interface ArchitecturalRequest {
-  type: 'analyze-code' | 'modify-system' | 'build-agent' | 'refine-behavior' | 'system-status';
+  type: 'code-analysis' | 'system-modification' | 'agent-creation' | 'behavior-refinement' | 'system-status';
   description: string;
   target?: string;
   priority: 'low' | 'medium' | 'high';
@@ -40,6 +40,8 @@ export interface AgentSpec {
     intelligence: string[];
     communication: string[];
   };
+  discordIntegration?: boolean;
+  createWatcher?: boolean;
 }
 
 export interface AnalysisResult {

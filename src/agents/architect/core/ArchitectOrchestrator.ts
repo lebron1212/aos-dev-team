@@ -4,6 +4,7 @@ import { CodeModifier } from '../operations/CodeModifier.js';
 import { AgentBuilder } from '../operations/AgentBuilder.js';
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
+import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
 
 export class ArchitectOrchestrator {
   private codeAnalyzer: CodeAnalyzer;
@@ -11,6 +12,7 @@ export class ArchitectOrchestrator {
   private builder: AgentBuilder;
   private refiner: SystemRefiner;
   private voice: ArchitectVoice;
+  private intelligence: CodeIntelligence;
 
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
@@ -18,6 +20,7 @@ export class ArchitectOrchestrator {
     this.builder = new AgentBuilder(config.claudeApiKey);
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
+    this.intelligence = new CodeIntelligence(config.claudeApiKey);
   }
 
   async executeArchitecturalWork(request: ArchitecturalRequest): Promise<string> {
@@ -33,14 +36,19 @@ export class ArchitectOrchestrator {
       return await this.handleHistory();
     }
     
+    // Check if this is an intelligence request that should be handled specially
+    if (await this.shouldUseIntelligence(request)) {
+      return await this.handleIntelligenceRequest(request);
+    }
+    
     switch (request.type) {
-      case 'analyze-code':
+      case 'code-analysis':
         return await this.handleCodeAnalysis(request);
-      case 'modify-system':
+      case 'system-modification':
         return await this.handleSystemModification(request);
-      case 'build-agent':
+      case 'agent-creation':
         return await this.handleAgentCreation(request);
-      case 'refine-behavior':
+      case 'behavior-refinement':
         return await this.handleBehaviorRefinement(request);
       case 'system-status':
         return await this.handleSystemStatus(request);
@@ -83,7 +91,7 @@ Health: ${analysis.healthScore}%`;
     
     if (buildResult.ready) {
       const envVars = buildResult.environmentVars ? 
-        `\n\nTo complete setup:\n${buildResult.environmentVars.map(v => `railway variables --set ${v}=your_token_here`).join('\n')}` : '';
+        `\n\nTo complete setup:\n${buildResult.environmentVars.map((v: string) => `railway variables --set ${v}=your_token_here`).join('\n')}` : '';
       
       return await this.voice.formatResponse(`Agent ${agentSpec.name} created with full structure. ${buildResult.summary}.${envVars}`, { type: 'creation' });
     } else {
@@ -114,5 +122,66 @@ Health: ${analysis.healthScore}%`;
   private async handleHistory(): Promise<string> {
     // This would show modification history
     return await this.voice.formatResponse("Modification history available. Recent changes tracked with git commits.", { type: 'info' });
+  }
+
+  /**
+   * Check if request should use the new intelligence system
+   */
+  private async shouldUseIntelligence(request: ArchitecturalRequest): Promise<boolean> {
+    const lowerDesc = request.description.toLowerCase();
+    
+    // Intelligence patterns
+    const isConfigQuery = lowerDesc.includes('what\'s') || lowerDesc.includes('current') || 
+                         lowerDesc.includes('how many') || lowerDesc.includes('show me');
+    
+    const isTargetedModification = lowerDesc.includes('tone down') || lowerDesc.includes('increase') ||
+                                  lowerDesc.includes('change') && (lowerDesc.includes('to') || lowerDesc.includes('from'));
+    
+    const isFeatureAnalysis = lowerDesc.includes('how does') && lowerDesc.includes('work');
+    
+    return isConfigQuery || isTargetedModification || isFeatureAnalysis;
+  }
+
+  /**
+   * Handle requests using the new intelligence system
+   */
+  private async handleIntelligenceRequest(request: ArchitecturalRequest): Promise<string> {
+    console.log(`[ArchitectOrchestrator] Using intelligence system for: ${request.description}`);
+    
+    try {
+      const result = await this.intelligence.processRequest(request.description);
+      
+      if (result.success) {
+        let response = `**${result.summary}**\n\n${result.details}`;
+        
+        if (result.configurations && result.configurations.length > 0) {
+          response += `\n\n**Key Configurations:**\n`;
+          result.configurations.slice(0, 5).forEach(config => {
+            response += `• ${config.key}: ${config.value} (${config.file.split('/').pop()}:${config.line})\n`;
+          });
+        }
+        
+        if (result.modifications && result.modifications.length > 0) {
+          response += `\n\n**Proposed Changes:**\n`;
+          result.modifications.forEach(mod => {
+            response += `• ${mod}\n`;
+          });
+        }
+        
+        if (result.affectedFiles.length > 0) {
+          response += `\n\n**Files Analyzed:** ${result.affectedFiles.length} files`;
+        }
+        
+        return await this.voice.formatResponse(response, { type: 'intelligence' });
+      } else {
+        // Fall back to standard processing
+        console.log(`[ArchitectOrchestrator] Intelligence processing failed, falling back to standard: ${result.summary}`);
+        return await this.handleCodeAnalysis(request);
+      }
+    } catch (error) {
+      console.error('[ArchitectOrchestrator] Intelligence system error:', error);
+      // Fall back to standard processing
+      return await this.handleCodeAnalysis(request);
+    }
   }
 }

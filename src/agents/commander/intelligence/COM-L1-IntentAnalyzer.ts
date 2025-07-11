@@ -31,7 +31,7 @@ LEVEL 1 CATEGORIES:
 - analyze: Examine/inspect (code review, performance, health, debug)
 - manage: Control workflow (pause, cancel, status, deploy, etc.)
 - question: Ask for information (how to, what is, explain, etc.)
-- conversation: General chat, feedback, thanks, etc.
+- conversation: General chat, feedback, thanks, off-topic requests, casual talk
 
 LEVEL 2 SUBCATEGORIES (examples):
 - build: build-ui, build-api, build-integration, build-full-app
@@ -62,6 +62,7 @@ EXAMPLES:
 "Make that red" → modify/modify-style/modify-component-style, [FrontendArchitect], simple  
 "How's the project?" → conversation/conversation-status/conversation-casual, [Commander], simple
 "How are we?" → conversation/conversation-status/conversation-casual, [Commander], simple
+"I want to create a beer" → conversation/conversation-offtopic/conversation-redirect, [Commander], simple
 "What's up?" → conversation/conversation-casual/conversation-greeting, [Commander], simple
 "Cancel the login work" → manage/manage-work/manage-cancel, [Commander], simple
 "What is React?" → question/question-concept/question-tech-concept, [Commander], simple

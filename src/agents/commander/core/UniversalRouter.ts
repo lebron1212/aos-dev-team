@@ -5,6 +5,7 @@ import { WorkManager } from '../workflow/WorkManager.js';
 import { DiscordInterface } from '../communication/DiscordInterface.js';
 import { VoiceSystem } from '../communication/VoiceSystem.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
+import Anthropic from '@anthropic-ai/sdk';
 
 export class UniversalRouter {
   private intentAnalyzer: COM_L1_IntentAnalyzer;
@@ -12,6 +13,7 @@ export class UniversalRouter {
   private agentOrchestrator: AgentOrchestrator;
   private workManager: WorkManager;
   private discordInterface: DiscordInterface;
+  private claude: Anthropic;
   
   // Context storage
   private conversationContext: Map<string, any> = new Map();
@@ -22,6 +24,7 @@ export class UniversalRouter {
     this.agentOrchestrator = new AgentOrchestrator(config);
     this.workManager = new WorkManager();
     this.discordInterface = new DiscordInterface(config);
+    this.claude = new Anthropic({ apiKey: config.claudeApiKey });
   }
 
   async routeUniversalInput(
@@ -223,31 +226,33 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    switch (intent.subcategory) {
-      case 'conversation-status':
-      case 'conversation-casual':
-        // Get current work status for context
-        const activeWork = Array.from(this.workManager.getActiveWorkItems()).length;
-        const recentWork = this.getConversationContext(userId).recentWorkItems?.length || 0;
-        
-        if (activeWork > 0) {
-          return `We're crushing it. ${activeWork} active work items in progress. What's next on the roadmap?`;
-        } else if (recentWork > 0) {
-          return `Ready to build. Just shipped ${recentWork} components recently → deployment pipeline is dialed in. What should we tackle next?`;
-        } else {
-          return `Systems online and ready. No active builds right now → perfect time to start something new. What do you want to create?`;
-        }
-        
-      case 'conversation-positive':
-        // Save positive feedback to memory service
-        return `Appreciate it. Always optimizing for that enterprise-grade quality → what's the next challenge?`;
-        
-      case 'conversation-negative':
-        return `Noted. I'll adjust the approach → let's iterate and get it right.`;
-        
-      default:
-        return `Ready to build. What's the vision?`;
+    // Let Claude handle conversation naturally with the TARS personality
+    const conversationPrompt = `The user said: "${intent.parameters.description}"
+
+This is casual conversation. Respond as the witty Silicon Valley CTO with TARS-level personality (75% sarcasm). 
+
+Context: You're an AI development commander. Stay in character, be witty and helpful, and naturally steer off-topic requests back to building/development when appropriate. Don't be robotic - be conversational and dynamic.
+
+${intent.subcategory === 'conversation-offtopic' ? 'This seems off-topic from development - handle with humor and redirect cleverly.' : ''}`;
+
+    try {
+      const response = await this.claude.messages.create({
+        model: 'claude-3-opus-20240229',
+        max_tokens: 300,
+        system: VoiceSystem.getSystemPrompt(),
+        messages: [{ role: 'user', content: conversationPrompt }]
+      });
+      
+      const content = response.content[0];
+      if (content.type === 'text') {
+        return VoiceSystem.enhanceCTOVoice(content.text);
+      }
+    } catch (error) {
+      console.error('[UniversalRouter] Conversation handling failed:', error);
     }
+    
+    // Simple fallback if Claude fails
+    return `Ready to build. What's the vision?`;
   }
 
   // Context management

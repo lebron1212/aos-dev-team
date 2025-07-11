@@ -60,7 +60,9 @@ COMPLEXITY ASSESSMENT:
 EXAMPLES:
 "Build a button" → build/build-ui/build-ui-component, [FrontendArchitect], simple
 "Make that red" → modify/modify-style/modify-component-style, [FrontendArchitect], simple  
-"How's the project?" → analyze/analyze-health/analyze-project-health, [CodeAnalyzer], simple
+"How's the project?" → conversation/conversation-status/conversation-casual, [Commander], simple
+"How are we?" → conversation/conversation-status/conversation-casual, [Commander], simple
+"What's up?" → conversation/conversation-casual/conversation-greeting, [Commander], simple
 "Cancel the login work" → manage/manage-work/manage-cancel, [Commander], simple
 "What is React?" → question/question-concept/question-tech-concept, [Commander], simple
 "Thanks, looks great!" → conversation/conversation-positive/conversation-feedback, [MemoryService], simple

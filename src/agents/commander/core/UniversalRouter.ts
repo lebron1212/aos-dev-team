@@ -224,15 +224,29 @@ export class UniversalRouter {
   ): Promise<string> {
     
     switch (intent.subcategory) {
+      case 'conversation-status':
+      case 'conversation-casual':
+        // Get current work status for context
+        const activeWork = Array.from(this.workManager.getActiveWorkItems()).length;
+        const recentWork = this.getConversationContext(userId).recentWorkItems?.length || 0;
+        
+        if (activeWork > 0) {
+          return `We're crushing it. ${activeWork} active work items in progress. What's next on the roadmap?`;
+        } else if (recentWork > 0) {
+          return `Ready to build. Just shipped ${recentWork} components recently → deployment pipeline is dialed in. What should we tackle next?`;
+        } else {
+          return `Systems online and ready. No active builds right now → perfect time to start something new. What do you want to create?`;
+        }
+        
       case 'conversation-positive':
         // Save positive feedback to memory service
-        return `Thanks. I'll remember that approach.\n(MemoryService TODO)`;
+        return `Appreciate it. Always optimizing for that enterprise-grade quality → what's the next challenge?`;
         
       case 'conversation-negative':
-        return `Noted. I'll adjust for next time.\n(MemoryService TODO)`;
+        return `Noted. I'll adjust the approach → let's iterate and get it right.`;
         
       default:
-        return `Ready to build. What would you like to create?`;
+        return `Ready to build. What's the vision?`;
     }
   }
 

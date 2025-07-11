@@ -47,6 +47,13 @@ export class UniversalRouter {
     try {
       const messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
       
+      // Check for debug commands first
+      const debugResponse = await this.handleDebugRequest(input);
+      if (debugResponse) {
+        await this.discordInterface.updateTrackedMessage(messageId, debugResponse);
+        return debugResponse;
+      }
+      
       const context = this.getConversationContext(userId);
       context.conversationHistory = messageHistory;
       
@@ -263,27 +270,8 @@ export class UniversalRouter {
     );
   }
 
-  private getConversationContext(userId: string): any {
-    return this.conversationContext.get(userId) || {};
-  }
-  
-  private storeConversationContext(userId: string, context: any): void {
-    this.conversationContext.set(userId, { ...this.getConversationContext(userId), ...context });
-  }
-  
-  private updateConversationContext(userId: string, updates: any): void {
-    this.storeConversationContext(userId, updates);
-  }
-  
-  private generateWorkItemTitle(intent: UniversalIntent): string {
-    const description = intent.parameters.description;
-    if (description.length <= 50) return description;
-    return description.substring(0, 47) + '...';
-  }
-}
-
-  // Add debug methods for checking feedback and learning
-  private async handleDebugRequest(input: string): Promise<string> {
+  // Debug methods for checking feedback and learning
+  private async handleDebugRequest(input: string): Promise<string | null> {
     const lowerInput = input.toLowerCase();
     
     if (lowerInput.includes('what have you learned') || lowerInput.includes('show feedback')) {
@@ -361,3 +349,22 @@ ${insights.length > 0 ? 'Insights:\n' + insights.join('\n') : 'No insights yet.'
       return 0;
     }
   }
+
+  private getConversationContext(userId: string): any {
+    return this.conversationContext.get(userId) || {};
+  }
+  
+  private storeConversationContext(userId: string, context: any): void {
+    this.conversationContext.set(userId, { ...this.getConversationContext(userId), ...context });
+  }
+  
+  private updateConversationContext(userId: string, updates: any): void {
+    this.storeConversationContext(userId, updates);
+  }
+  
+  private generateWorkItemTitle(intent: UniversalIntent): string {
+    const description = intent.parameters.description;
+    if (description.length <= 50) return description;
+    return description.substring(0, 47) + '...';
+  }
+}

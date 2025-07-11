@@ -122,7 +122,12 @@ Always include a watcher for learning and eventual local model replacement.`
       // 8. Update main index.ts to include new agent
       await this.updateMainIndex(spec);
       
-      // 9. Commit the new agent
+      // 9. Register with Commander
+      if (spec.discordIntegration) {
+        await this.registerBotWithCommander(spec, 'PLACEHOLDER_CHANNEL_ID');
+      }
+      
+      // 10. Commit the new agent
       await this.commitNewAgent(spec, createdFiles);
       
       return {
@@ -149,482 +154,6 @@ Always include a watcher for learning and eventual local model replacement.`
     }
   }
 
-  private async createWatcherDirectories(basePath: string): Promise<void> {
-    const dirs = [
-      basePath,
-      `${basePath}/core`,
-      `${basePath}/intelligence`, 
-      `${basePath}/communication`,
-      `${basePath}/types`
-    ];
-    
-    for (const dir of dirs) {
-      await fs.mkdir(dir, { recursive: true });
-    }
-  }
-
-  private async generateWatcherFiles(spec: AgentSpec, watcherPath: string): Promise<string[]> {
-    const files: string[] = [];
-    const watcherName = `${spec.name}Watch`;
-    
-    // Main watcher file
-    const mainFile = `${watcherPath}/${watcherName}.ts`;
-    const mainContent = await this.generateWatcherMainFile(spec, watcherName);
-    await fs.writeFile(mainFile, mainContent);
-    files.push(mainFile);
-    
-    // Watcher intelligence
-    const intelligenceFile = `${watcherPath}/intelligence/${watcherName}Intelligence.ts`;
-    const intelligenceContent = await this.generateWatcherIntelligenceFile(spec, watcherName);
-    await fs.writeFile(intelligenceFile, intelligenceContent);
-    files.push(intelligenceFile);
-    
-    // Watcher core analyzer
-    const coreFile = `${watcherPath}/core/${watcherName}Analyzer.ts`;
-    const coreContent = await this.generateWatcherCoreFile(spec, watcherName);
-    await fs.writeFile(coreFile, coreContent);
-    files.push(coreFile);
-    
-    // Watcher types
-    const typesFile = `${watcherPath}/types/index.ts`;
-    const typesContent = await this.generateWatcherTypesFile(spec, watcherName);
-    await fs.writeFile(typesFile, typesContent);
-    files.push(typesFile);
-    
-    // Watcher index
-    const indexFile = `${watcherPath}/index.ts`;
-    const indexContent = `export { ${watcherName} } from './${watcherName}.js';\nexport * from './types/index.js';`;
-    await fs.writeFile(indexFile, indexContent);
-    files.push(indexFile);
-    
-    return files;
-  }
-
-  private async generateWatcherMainFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `import fs from 'fs/promises';
-import { ${watcherName}Intelligence } from './intelligence/${watcherName}Intelligence.js';
-import { ${watcherName}Analyzer } from './core/${watcherName}Analyzer.js';
-
-interface ${spec.name}Interaction {
-  timestamp: string;
-  input: string;
-  response: string;
-  context: string[];
-  feedback?: string;
-  quality: 'good' | 'needs_improvement';
-  category: string;
-  confidence: number;
-  apiUsed: 'claude' | 'local' | 'hybrid';
-}
-
-export class ${watcherName} {
-  private intelligence: ${watcherName}Intelligence;
-  private analyzer: ${watcherName}Analyzer;
-  private interactions: ${spec.name}Interaction[] = [];
-  private interactionsFile = 'data/${spec.name.toLowerCase()}-interactions.json';
-  private isWatching = true;
-  private localModelReady = false;
-
-  constructor() {
-    this.intelligence = new ${watcherName}Intelligence();
-    this.analyzer = new ${watcherName}Analyzer();
-    this.loadInteractions();
-    console.log('[${watcherName}] Learning system initialized - ${spec.watcherPurpose}');
-  }
-
-  async log${spec.name}Interaction(
-    input: string,
-    response: string,
-    context: string[],
-    feedback?: string
-  ): Promise<void> {
-    if (!this.isWatching) return;
-
-    const interaction: ${spec.name}Interaction = {
-      timestamp: new Date().toISOString(),
-      input: input.trim(),
-      response: response.trim(),
-      context: context.slice(-3),
-      feedback,
-      quality: this.evaluateQuality(response, feedback),
-      category: this.categorizeInteraction(input, response),
-      confidence: this.calculateConfidence(response, feedback),
-      apiUsed: 'claude'
-    };
-
-    this.interactions.push(interaction);
-
-    if (this.interactions.length > 1000) {
-      this.interactions = this.interactions.slice(-1000);
-    }
-
-    await this.saveInteractions();
-
-    console.log(\`[${watcherName}] Logged \${interaction.category} interaction: quality \${interaction.quality}, confidence \${interaction.confidence.toFixed(2)}\`);
-
-    if (feedback) {
-      await this.processFeedback(interaction);
-    }
-  }
-
-  async getTrainingStats(): Promise<any> {
-    const goodInteractions = this.interactions.filter(i => i.quality === 'good').length;
-    const totalInteractions = this.interactions.length;
-    const categories = this.getCategoryBreakdown();
-
-    return {
-      purpose: '${spec.watcherPurpose}',
-      totalInteractions,
-      goodInteractions,
-      qualityRatio: totalInteractions > 0 ? goodInteractions / totalInteractions : 0,
-      categories,
-      localModelReady: this.localModelReady,
-      watchingStatus: this.isWatching ? 'active' : 'paused'
-    };
-  }
-
-  async shouldUseLocalModel(inputType: string): Promise<boolean> {
-    const goodCount = this.interactions.filter(i => 
-      i.quality === 'good' && 
-      i.category === this.categorizeByInput(inputType)
-    ).length;
-
-    return this.localModelReady && goodCount >= 50; // Threshold for local usage
-  }
-
-  private evaluateQuality(response: string, feedback?: string): 'good' | 'needs_improvement' {
-    if (feedback) {
-      const negative = /bad|wrong|terrible|don't|avoid/i.test(feedback);
-      const positive = /good|great|perfect|excellent/i.test(feedback);
-      if (negative) return 'needs_improvement';
-      if (positive) return 'good';
-    }
-
-    // Default quality assessment based on response characteristics
-    const wordCount = response.split(/\\s+/).length;
-    const hasErrors = response.includes('error') || response.includes('failed');
-    
-    return wordCount > 5 && !hasErrors ? 'good' : 'needs_improvement';
-  }
-
-  private categorizeInteraction(input: string, response: string): string {
-    // Categorize based on ${spec.name} specific patterns
-    ${spec.capabilities.map(cap => `if (input.toLowerCase().includes('${cap.toLowerCase()}')) return '${cap}';`).join('\n    ')}
-    return 'general';
-  }
-
-  private categorizeByInput(input: string): string {
-    return this.categorizeInteraction(input, '');
-  }
-
-  private calculateConfidence(response: string, feedback?: string): number {
-    let confidence = 0.7;
-    
-    if (feedback) {
-      if (/excellent|perfect|great/i.test(feedback)) confidence = 0.9;
-      if (/bad|wrong|terrible/i.test(feedback)) confidence = 0.3;
-    }
-
-    const wordCount = response.split(/\\s+/).length;
-    if (wordCount >= 5 && wordCount <= 50) confidence += 0.1;
-
-    return Math.max(0.1, Math.min(0.9, confidence));
-  }
-
-  private getCategoryBreakdown(): Record<string, number> {
-    const breakdown: Record<string, number> = {};
-    this.interactions.forEach(i => {
-      breakdown[i.category] = (breakdown[i.category] || 0) + 1;
-    });
-    return breakdown;
-  }
-
-  private async processFeedback(interaction: ${spec.name}Interaction): Promise<void> {
-    if (interaction.feedback) {
-      console.log(\`[${watcherName}] Processing feedback: \${interaction.feedback}\`);
-      // Learn from feedback patterns
-    }
-  }
-
-  private async loadInteractions(): Promise<void> {
-    try {
-      const data = await fs.readFile(this.interactionsFile, 'utf8');
-      this.interactions = JSON.parse(data);
-      console.log(\`[${watcherName}] Loaded \${this.interactions.length} previous interactions\`);
-    } catch (error) {
-      this.interactions = [];
-      console.log(\`[${watcherName}] No previous interactions found, starting fresh\`);
-    }
-  }
-
-  private async saveInteractions(): Promise<void> {
-    try {
-      await fs.mkdir('data', { recursive: true });
-      await fs.writeFile(this.interactionsFile, JSON.stringify(this.interactions, null, 2));
-    } catch (error) {
-      console.error(\`[${watcherName}] Failed to save interactions:\`, error);
-    }
-  }
-
-  pauseWatching(): void {
-    this.isWatching = false;
-    console.log(\`[${watcherName}] Paused watching\`);
-  }
-
-  resumeWatching(): void {
-    this.isWatching = true;
-    console.log(\`[${watcherName}] Resumed watching\`);
-  }
-}`;
-  }
-
-  private async generateWatcherIntelligenceFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export class ${watcherName}Intelligence {
-  
-  constructor() {
-    console.log('[${watcherName}Intelligence] Learning intelligence initialized');
-  }
-
-  analyzePatterns(interactions: any[]): any {
-    // Analyze interaction patterns for ${spec.name}
-    const patterns = {
-      commonInputs: this.extractCommonInputs(interactions),
-      responsePatterns: this.extractResponsePatterns(interactions),
-      successFactors: this.identifySuccessFactors(interactions)
-    };
-
-    return patterns;
-  }
-
-  private extractCommonInputs(interactions: any[]): string[] {
-    // Extract frequently seen input patterns
-    const inputs = interactions.map(i => i.input.toLowerCase());
-    const frequency: Record<string, number> = {};
-    
-    inputs.forEach(input => {
-      const words = input.split(' ');
-      words.forEach(word => {
-        if (word.length > 3) {
-          frequency[word] = (frequency[word] || 0) + 1;
-        }
-      });
-    });
-
-    return Object.entries(frequency)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 10)
-      .map(([word]) => word);
-  }
-
-  private extractResponsePatterns(interactions: any[]): any[] {
-    // Identify successful response patterns
-    return interactions
-      .filter(i => i.quality === 'good')
-      .map(i => ({
-        length: i.response.split(' ').length,
-        tone: this.analyzeTone(i.response),
-        category: i.category
-      }));
-  }
-
-  private identifySuccessFactors(interactions: any[]): string[] {
-    const goodInteractions = interactions.filter(i => i.quality === 'good');
-    const factors: string[] = [];
-
-    const avgLength = goodInteractions.reduce((sum, i) => sum + i.response.split(' ').length, 0) / goodInteractions.length;
-    if (avgLength < 20) factors.push('Concise responses');
-    if (avgLength > 50) factors.push('Detailed responses');
-
-    return factors;
-  }
-
-  private analyzeTone(response: string): string {
-    if (response.includes('!')) return 'enthusiastic';
-    if (response.includes('?')) return 'questioning';
-    return 'neutral';
-  }
-}`;
-  }
-
-  private async generateWatcherCoreFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export class ${watcherName}Analyzer {
-  
-  constructor() {
-    console.log('[${watcherName}Analyzer] Pattern analyzer initialized');
-  }
-
-  analyzePerformance(interactions: any[]): any {
-    const recentInteractions = interactions.filter(i => 
-      new Date(i.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000)
-    );
-
-    return {
-      totalInteractions: interactions.length,
-      recentInteractions: recentInteractions.length,
-      qualityTrend: this.calculateQualityTrend(recentInteractions),
-      categoryDistribution: this.getCategoryDistribution(interactions),
-      improvementAreas: this.identifyImprovementAreas(interactions)
-    };
-  }
-
-  private calculateQualityTrend(interactions: any[]): string {
-    const windows = this.createTimeWindows(interactions, 3); // 3-hour windows
-    
-    if (windows.length < 2) return 'stable';
-    
-    const recent = windows.slice(-2);
-    const change = recent[1].qualityRatio - recent[0].qualityRatio;
-    
-    if (Math.abs(change) < 0.1) return 'stable';
-    return change > 0 ? 'improving' : 'declining';
-  }
-
-  private createTimeWindows(interactions: any[], hours: number): any[] {
-    const now = Date.now();
-    const windows = [];
-    
-    for (let i = 0; i < 8; i++) { // Last 8 windows
-      const start = now - (i + 1) * hours * 60 * 60 * 1000;
-      const end = now - i * hours * 60 * 60 * 1000;
-      
-      const windowInteractions = interactions.filter(int => {
-        const timestamp = new Date(int.timestamp).getTime();
-        return timestamp >= start && timestamp < end;
-      });
-      
-      const goodCount = windowInteractions.filter(i => i.quality === 'good').length;
-      
-      windows.unshift({
-        period: i,
-        interactions: windowInteractions,
-        count: windowInteractions.length,
-        qualityRatio: windowInteractions.length > 0 ? goodCount / windowInteractions.length : 0
-      });
-    }
-    
-    return windows;
-  }
-
-  private getCategoryDistribution(interactions: any[]): Record<string, number> {
-    const distribution: Record<string, number> = {};
-    interactions.forEach(i => {
-      distribution[i.category] = (distribution[i.category] || 0) + 1;
-    });
-    return distribution;
-  }
-
-  private identifyImprovementAreas(interactions: any[]): string[] {
-    const areas: string[] = [];
-    const poorQuality = interactions.filter(i => i.quality === 'needs_improvement');
-    
-    if (poorQuality.length > interactions.length * 0.3) {
-      areas.push('Overall response quality needs improvement');
-    }
-
-    const categories = this.getCategoryDistribution(poorQuality);
-    Object.entries(categories).forEach(([category, count]) => {
-      if (count > 5) {
-        areas.push(\`Improve \${category} responses\`);
-      }
-    });
-
-    return areas;
-  }
-}`;
-  }
-
-  private async generateWatcherTypesFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export interface ${spec.name}Interaction {
-  timestamp: string;
-  input: string;
-  response: string;
-  context: string[];
-  feedback?: string;
-  quality: 'good' | 'needs_improvement';
-  category: string;
-  confidence: number;
-  apiUsed: 'claude' | 'local' | 'hybrid';
-}
-
-export interface ${spec.name}Pattern {
-  type: 'input' | 'response' | 'feedback';
-  pattern: string;
-  frequency: number;
-  success_rate: number;
-}
-
-export interface ${spec.name}Analytics {
-  totalInteractions: number;
-  qualityRatio: number;
-  categoryDistribution: Record<string, number>;
-  patterns: ${spec.name}Pattern[];
-  localModelReadiness: number;
-}`;
-  }
-
-  // Update existing method to include watcher in main index
-  private async updateMainIndex(spec: AgentSpec): Promise<void> {
-    try {
-      const indexPath = 'src/index.ts';
-      const currentContent = await fs.readFile(indexPath, 'utf8');
-      
-      const importLine = `import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';`;
-      const watcherImportLine = spec.createWatcher ? 
-        `import { ${spec.name}Watch } from './agents/watcher/${spec.name.toLowerCase()}watch/${spec.name}Watch.js';` : '';
-      
-      if (currentContent.includes(importLine)) {
-        console.log(`[AgentBuilder] ${spec.name} already integrated in index.ts`);
-        return;
-      }
-      
-      const lines = currentContent.split('\n');
-      const lastImportIndex = lines.findLastIndex(line => line.startsWith('import'));
-      
-      lines.splice(lastImportIndex + 1, 0, importLine);
-      if (watcherImportLine) {
-        lines.splice(lastImportIndex + 2, 0, watcherImportLine);
-      }
-      
-      const startFunctionName = `start${spec.name}`;
-      const startFunction = `
-async function ${startFunctionName}() {
-  const ${spec.name.toLowerCase()}Config = {
-    ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: process.env.${spec.name.toUpperCase()}_DISCORD_TOKEN!,\n    ${spec.name.toLowerCase()}ChannelId: process.env.${spec.name.toUpperCase()}_CHANNEL_ID!,\n    ` : ''}claudeApiKey: process.env.CLAUDE_API_KEY!
-  };
-
-  if (${spec.discordIntegration ? `${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}Token && ${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}ChannelId` : 'true'}) {
-    const ${spec.name.toLowerCase()} = new ${spec.name}(${spec.name.toLowerCase()}Config);${spec.createWatcher ? `\n    const ${spec.name.toLowerCase()}Watch = new ${spec.name}Watch();` : ''}
-    await ${spec.name.toLowerCase()}.start();
-  } else {
-    console.log('[${spec.name}] Environment variables not set, skipping startup');
-  }
-}`;
-      
-      const promiseAllIndex = lines.findIndex(line => line.includes('Promise.all'));
-      if (promiseAllIndex !== -1) {
-        lines.splice(promiseAllIndex, 0, startFunction);
-        
-        const promiseAllLine = lines[promiseAllIndex + startFunction.split('\n').length];
-        if (promiseAllLine.includes('startCommander()')) {
-          lines[promiseAllIndex + startFunction.split('\n').length] = promiseAllLine.replace(
-            '])',
-            `,\n  ${startFunctionName}()\n])`
-          );
-        }
-      } else {
-        lines.push(startFunction);
-        lines.push(`\n${startFunctionName}().catch(console.error);`);
-      }
-      
-      await fs.writeFile(indexPath, lines.join('\n'));
-      console.log(`[AgentBuilder] Updated index.ts to include ${spec.name}${spec.createWatcher ? ' and watcher' : ''}`);
-      
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to update index.ts:`, error);
-    }
-  }
-
-  // Keep all existing methods...
   private async createAgentDirectories(basePath: string): Promise<void> {
     const dirs = [
       basePath,
@@ -639,29 +168,20 @@ async function ${startFunctionName}() {
     }
   }
 
-  private fallbackAgentSpec(request: string): AgentSpec {
-    const name = request.includes('monitor') ? 'Monitor' : 
-                request.includes('deploy') ? 'Deployer' :
-                request.includes('quality') ? 'QualityChecker' : 'CustomAgent';
+  private async createWatcherDirectories(basePath: string): Promise<void> {
+    const dirs = [
+      basePath,
+      `${basePath}/core`,
+      `${basePath}/intelligence`, 
+      `${basePath}/communication`,
+      `${basePath}/types`
+    ];
     
-    return {
-      name,
-      purpose: `Agent for ${request}`,
-      capabilities: ['basic-processing'],
-      dependencies: ['@anthropic-ai/sdk'],
-      structure: {
-        core: [`${name}.ts`],
-        intelligence: [`${name}Intelligence.ts`],
-        communication: [`${name}Voice.ts`]
-      },
-      discordIntegration: true,
-      voicePersonality: 'Professional and helpful',
-      createWatcher: true,
-      watcherPurpose: `Learning optimization patterns for ${name}`
-    };
+    for (const dir of dirs) {
+      await fs.mkdir(dir, { recursive: true });
+    }
   }
 
-  // Include all the existing generation methods from previous version
   private async generateCoreFiles(spec: AgentSpec, basePath: string): Promise<string[]> {
     const files: string[] = [];
     
@@ -698,6 +218,38 @@ async function ${startFunctionName}() {
       await fs.writeFile(voiceFile, voiceContent);
       files.push(voiceFile);
     }
+    
+    return files;
+  }
+
+  private async generateWatcherFiles(spec: AgentSpec, watcherPath: string): Promise<string[]> {
+    const files: string[] = [];
+    const watcherName = `${spec.name}Watch`;
+    
+    const mainFile = `${watcherPath}/${watcherName}.ts`;
+    const mainContent = await this.generateWatcherMainFile(spec, watcherName);
+    await fs.writeFile(mainFile, mainContent);
+    files.push(mainFile);
+    
+    const intelligenceFile = `${watcherPath}/intelligence/${watcherName}Intelligence.ts`;
+    const intelligenceContent = await this.generateWatcherIntelligenceFile(spec, watcherName);
+    await fs.writeFile(intelligenceFile, intelligenceContent);
+    files.push(intelligenceFile);
+    
+    const coreFile = `${watcherPath}/core/${watcherName}Analyzer.ts`;
+    const coreContent = await this.generateWatcherCoreFile(spec, watcherName);
+    await fs.writeFile(coreFile, coreContent);
+    files.push(coreFile);
+    
+    const typesFile = `${watcherPath}/types/index.ts`;
+    const typesContent = await this.generateWatcherTypesFile(spec, watcherName);
+    await fs.writeFile(typesFile, typesContent);
+    files.push(typesFile);
+    
+    const indexFile = `${watcherPath}/index.ts`;
+    const indexContent = `export { ${watcherName} } from './${watcherName}.js';\nexport * from './types/index.js';`;
+    await fs.writeFile(indexFile, indexContent);
+    files.push(indexFile);
     
     return files;
   }
@@ -942,6 +494,289 @@ Context: \${options.type || 'general'}\`
 }`;
   }
 
+  private async generateWatcherMainFile(spec: AgentSpec, watcherName: string): Promise<string> {
+    return `import fs from 'fs/promises';
+import { ${watcherName}Intelligence } from './intelligence/${watcherName}Intelligence.js';
+import { ${watcherName}Analyzer } from './core/${watcherName}Analyzer.js';
+
+interface ${spec.name}Interaction {
+  timestamp: string;
+  input: string;
+  response: string;
+  context: string[];
+  feedback?: string;
+  quality: 'good' | 'needs_improvement';
+  category: string;
+  confidence: number;
+  apiUsed: 'claude' | 'local' | 'hybrid';
+}
+
+export class ${watcherName} {
+  private intelligence: ${watcherName}Intelligence;
+  private analyzer: ${watcherName}Analyzer;
+  private interactions: ${spec.name}Interaction[] = [];
+  private interactionsFile = 'data/${spec.name.toLowerCase()}-interactions.json';
+  private isWatching = true;
+  private localModelReady = false;
+
+  constructor() {
+    this.intelligence = new ${watcherName}Intelligence();
+    this.analyzer = new ${watcherName}Analyzer();
+    this.loadInteractions();
+    console.log('[${watcherName}] Learning system initialized - ${spec.watcherPurpose}');
+  }
+
+  async log${spec.name}Interaction(
+    input: string,
+    response: string,
+    context: string[],
+    feedback?: string
+  ): Promise<void> {
+    if (!this.isWatching) return;
+
+    const interaction: ${spec.name}Interaction = {
+      timestamp: new Date().toISOString(),
+      input: input.trim(),
+      response: response.trim(),
+      context: context.slice(-3),
+      feedback,
+      quality: this.evaluateQuality(response, feedback),
+      category: this.categorizeInteraction(input, response),
+      confidence: this.calculateConfidence(response, feedback),
+      apiUsed: 'claude'
+    };
+
+    this.interactions.push(interaction);
+
+    if (this.interactions.length > 1000) {
+      this.interactions = this.interactions.slice(-1000);
+    }
+
+    await this.saveInteractions();
+
+    console.log(\`[${watcherName}] Logged \${interaction.category} interaction: quality \${interaction.quality}, confidence \${interaction.confidence.toFixed(2)}\`);
+
+    if (feedback) {
+      await this.processFeedback(interaction);
+    }
+  }
+
+  private evaluateQuality(response: string, feedback?: string): 'good' | 'needs_improvement' {
+    if (feedback) {
+      const negative = /bad|wrong|terrible|don't|avoid/i.test(feedback);
+      const positive = /good|great|perfect|excellent/i.test(feedback);
+      if (negative) return 'needs_improvement';
+      if (positive) return 'good';
+    }
+
+    const wordCount = response.split(/\\s+/).length;
+    const hasErrors = response.includes('error') || response.includes('failed');
+    
+    return wordCount > 5 && !hasErrors ? 'good' : 'needs_improvement';
+  }
+
+  private categorizeInteraction(input: string, response: string): string {
+    ${spec.capabilities.map(cap => `if (input.toLowerCase().includes('${cap.toLowerCase()}')) return '${cap}';`).join('\n    ')}
+    return 'general';
+  }
+
+  private calculateConfidence(response: string, feedback?: string): number {
+    let confidence = 0.7;
+    
+    if (feedback) {
+      if (/excellent|perfect|great/i.test(feedback)) confidence = 0.9;
+      if (/bad|wrong|terrible/i.test(feedback)) confidence = 0.3;
+    }
+
+    const wordCount = response.split(/\\s+/).length;
+    if (wordCount >= 5 && wordCount <= 50) confidence += 0.1;
+
+    return Math.max(0.1, Math.min(0.9, confidence));
+  }
+
+  private async processFeedback(interaction: ${spec.name}Interaction): Promise<void> {
+    if (interaction.feedback) {
+      console.log(\`[${watcherName}] Processing feedback: \${interaction.feedback}\`);
+    }
+  }
+
+  private async loadInteractions(): Promise<void> {
+    try {
+      const data = await fs.readFile(this.interactionsFile, 'utf8');
+      this.interactions = JSON.parse(data);
+      console.log(\`[${watcherName}] Loaded \${this.interactions.length} previous interactions\`);
+    } catch (error) {
+      this.interactions = [];
+      console.log(\`[${watcherName}] No previous interactions found, starting fresh\`);
+    }
+  }
+
+  private async saveInteractions(): Promise<void> {
+    try {
+      await fs.mkdir('data', { recursive: true });
+      await fs.writeFile(this.interactionsFile, JSON.stringify(this.interactions, null, 2));
+    } catch (error) {
+      console.error(\`[${watcherName}] Failed to save interactions:\`, error);
+    }
+  }
+
+  pauseWatching(): void {
+    this.isWatching = false;
+    console.log(\`[${watcherName}] Paused watching\`);
+  }
+
+  resumeWatching(): void {
+    this.isWatching = true;
+    console.log(\`[${watcherName}] Resumed watching\`);
+  }
+}`;
+  }
+
+  private async generateWatcherIntelligenceFile(spec: AgentSpec, watcherName: string): Promise<string> {
+    return `export class ${watcherName}Intelligence {
+  
+  constructor() {
+    console.log('[${watcherName}Intelligence] Learning intelligence initialized');
+  }
+
+  analyzePatterns(interactions: any[]): any {
+    const patterns = {
+      commonInputs: this.extractCommonInputs(interactions),
+      responsePatterns: this.extractResponsePatterns(interactions),
+      successFactors: this.identifySuccessFactors(interactions)
+    };
+
+    return patterns;
+  }
+
+  private extractCommonInputs(interactions: any[]): string[] {
+    const inputs = interactions.map(i => i.input.toLowerCase());
+    const frequency: Record<string, number> = {};
+    
+    inputs.forEach(input => {
+      const words = input.split(' ');
+      words.forEach(word => {
+        if (word.length > 3) {
+          frequency[word] = (frequency[word] || 0) + 1;
+        }
+      });
+    });
+
+    return Object.entries(frequency)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 10)
+      .map(([word]) => word);
+  }
+
+  private extractResponsePatterns(interactions: any[]): any[] {
+    return interactions
+      .filter(i => i.quality === 'good')
+      .map(i => ({
+        length: i.response.split(' ').length,
+        tone: this.analyzeTone(i.response),
+        category: i.category
+      }));
+  }
+
+  private identifySuccessFactors(interactions: any[]): string[] {
+    const goodInteractions = interactions.filter(i => i.quality === 'good');
+    const factors: string[] = [];
+
+    const avgLength = goodInteractions.reduce((sum, i) => sum + i.response.split(' ').length, 0) / goodInteractions.length;
+    if (avgLength < 20) factors.push('Concise responses');
+    if (avgLength > 50) factors.push('Detailed responses');
+
+    return factors;
+  }
+
+  private analyzeTone(response: string): string {
+    if (response.includes('!')) return 'enthusiastic';
+    if (response.includes('?')) return 'questioning';
+    return 'neutral';
+  }
+}`;
+  }
+
+  private async generateWatcherCoreFile(spec: AgentSpec, watcherName: string): Promise<string> {
+    return `export class ${watcherName}Analyzer {
+  
+  constructor() {
+    console.log('[${watcherName}Analyzer] Pattern analyzer initialized');
+  }
+
+  analyzePerformance(interactions: any[]): any {
+    const recentInteractions = interactions.filter(i => 
+      new Date(i.timestamp) > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
+
+    return {
+      totalInteractions: interactions.length,
+      recentInteractions: recentInteractions.length,
+      qualityTrend: this.calculateQualityTrend(recentInteractions),
+      categoryDistribution: this.getCategoryDistribution(interactions),
+      improvementAreas: this.identifyImprovementAreas(interactions)
+    };
+  }
+
+  private calculateQualityTrend(interactions: any[]): string {
+    if (interactions.length < 2) return 'stable';
+    
+    const recent = interactions.slice(-10);
+    const goodCount = recent.filter(i => i.quality === 'good').length;
+    
+    return goodCount > 5 ? 'improving' : 'needs_work';
+  }
+
+  private getCategoryDistribution(interactions: any[]): Record<string, number> {
+    const distribution: Record<string, number> = {};
+    interactions.forEach(i => {
+      distribution[i.category] = (distribution[i.category] || 0) + 1;
+    });
+    return distribution;
+  }
+
+  private identifyImprovementAreas(interactions: any[]): string[] {
+    const areas: string[] = [];
+    const poorQuality = interactions.filter(i => i.quality === 'needs_improvement');
+    
+    if (poorQuality.length > interactions.length * 0.3) {
+      areas.push('Overall response quality needs improvement');
+    }
+
+    return areas;
+  }
+}`;
+  }
+
+  private async generateWatcherTypesFile(spec: AgentSpec, watcherName: string): Promise<string> {
+    return `export interface ${spec.name}Interaction {
+  timestamp: string;
+  input: string;
+  response: string;
+  context: string[];
+  feedback?: string;
+  quality: 'good' | 'needs_improvement';
+  category: string;
+  confidence: number;
+  apiUsed: 'claude' | 'local' | 'hybrid';
+}
+
+export interface ${spec.name}Pattern {
+  type: 'input' | 'response' | 'feedback';
+  pattern: string;
+  frequency: number;
+  success_rate: number;
+}
+
+export interface ${spec.name}Analytics {
+  totalInteractions: number;
+  qualityRatio: number;
+  categoryDistribution: Record<string, number>;
+  patterns: ${spec.name}Pattern[];
+  localModelReadiness: number;
+}`;
+  }
+
   private async generateTypesFile(spec: AgentSpec, basePath: string): Promise<string> {
     const typesFile = `${basePath}/types/index.ts`;
     const content = `export interface ${spec.name}Config {
@@ -974,77 +809,70 @@ export * from './types/index.js';`;
     return indexFile;
   }
 
-  private async commitNewAgent(spec: AgentSpec, files: string[]): Promise<void> {
+  private async updateMainIndex(spec: AgentSpec): Promise<void> {
     try {
-      execSync('git add .', { stdio: 'pipe' });
-      execSync(`git commit -m "🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}"`, { stdio: 'pipe' });
-      execSync('git push origin main', { stdio: 'pipe' });
-      console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to commit ${spec.name}:`, error);
-    }
-  }
-}
-
-  // Add to AgentBuilder class
-  async generateAgentWithAutoDiscord(spec: AgentSpec, guildId?: string): Promise<any> {
-    console.log(`[AgentBuilder] Building ${spec.name} with auto Discord setup`);
-    
-    // First create the agent normally
-    const buildResult = await this.generateAgent(spec);
-    
-    if (buildResult.ready && spec.discordIntegration) {
-      try {
-        // Auto-create Discord bot
-        const discordCreator = new DiscordBotCreator(
-          process.env.CLAUDE_API_KEY!,
-          process.env.DISCORD_TOKEN! // Main bot token for API calls
-        );
-        
-        const botConfig = await discordCreator.createDiscordBot(spec.name, spec.purpose);
-        
-        if (botConfig && guildId) {
-          // Auto-create channel
-          const channelId = await discordCreator.createChannelForAgent(guildId, spec.name);
-          
-          return {
-            ...buildResult,
-            discordSetup: 'automated',
-            botToken: botConfig.token,
-            channelId,
-            inviteUrl: botConfig.inviteUrl,
-            environmentVars: [], // Already set automatically
-            instructions: `Discord bot created automatically! Invite URL: ${botConfig.inviteUrl}`
-          };
-        }
-        
-        return {
-          ...buildResult,
-          discordSetup: 'partial',
-          instructions: 'Discord bot created, but channel setup needs guild ID'
-        };
-        
-      } catch (error) {
-        console.error('[AgentBuilder] Auto Discord setup failed:', error);
-        return {
-          ...buildResult,
-          discordSetup: 'failed',
-          instructions: 'Agent created but Discord setup failed - use manual setup'
-        };
+      const indexPath = 'src/index.ts';
+      const currentContent = await fs.readFile(indexPath, 'utf8');
+      
+      const importLine = `import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';`;
+      const watcherImportLine = spec.createWatcher ? 
+        `import { ${spec.name}Watch } from './agents/watcher/${spec.name.toLowerCase()}watch/${spec.name}Watch.js';` : '';
+      
+      if (currentContent.includes(importLine)) {
+        console.log(`[AgentBuilder] ${spec.name} already integrated in index.ts`);
+        return;
       }
+      
+      const lines = currentContent.split('\n');
+      const lastImportIndex = lines.findLastIndex(line => line.startsWith('import'));
+      
+      lines.splice(lastImportIndex + 1, 0, importLine);
+      if (watcherImportLine) {
+        lines.splice(lastImportIndex + 2, 0, watcherImportLine);
+      }
+      
+      const startFunctionName = `start${spec.name}`;
+      const startFunction = `
+async function ${startFunctionName}() {
+  const ${spec.name.toLowerCase()}Config = {
+    ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: process.env.${spec.name.toUpperCase()}_DISCORD_TOKEN!,\n    ${spec.name.toLowerCase()}ChannelId: process.env.${spec.name.toUpperCase()}_CHANNEL_ID!,\n    ` : ''}claudeApiKey: process.env.CLAUDE_API_KEY!
+  };
+
+  if (${spec.discordIntegration ? `${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}Token && ${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}ChannelId` : 'true'}) {
+    const ${spec.name.toLowerCase()} = new ${spec.name}(${spec.name.toLowerCase()}Config);${spec.createWatcher ? `\n    const ${spec.name.toLowerCase()}Watch = new ${spec.name}Watch();` : ''}
+    await ${spec.name.toLowerCase()}.start();
+  } else {
+    console.log('[${spec.name}] Environment variables not set, skipping startup');
+  }
+}`;
+      
+      const promiseAllIndex = lines.findIndex(line => line.includes('Promise.all'));
+      if (promiseAllIndex !== -1) {
+        lines.splice(promiseAllIndex, 0, startFunction);
+        
+        const promiseAllLine = lines[promiseAllIndex + startFunction.split('\n').length];
+        if (promiseAllLine.includes('startCommander()')) {
+          lines[promiseAllIndex + startFunction.split('\n').length] = promiseAllLine.replace(
+            '])',
+            `,\n  ${startFunctionName}()\n])`
+          );
+        }
+      } else {
+        lines.push(startFunction);
+        lines.push(`\n${startFunctionName}().catch(console.error);`);
+      }
+      
+      await fs.writeFile(indexPath, lines.join('\n'));
+      console.log(`[AgentBuilder] Updated index.ts to include ${spec.name}${spec.createWatcher ? ' and watcher' : ''}`);
+      
+    } catch (error) {
+      console.error(`[AgentBuilder] Failed to update index.ts:`, error);
     }
-    
-    return buildResult;
   }
 
-  // Add auto-registration method to AgentBuilder
   private async registerBotWithCommander(spec: AgentSpec, channelId: string): Promise<void> {
     try {
-      // This would be called during agent creation to register with Commander
       console.log(`[AgentBuilder] Registering ${spec.name} with Commander's BotOrchestrator`);
-      
-      // In a real implementation, this could make an API call to Commander
-      // or write to a shared registry file that Commander monitors
       
       const registrationData = {
         name: spec.name,
@@ -1054,8 +882,6 @@ export * from './types/index.js';`;
         registeredAt: new Date().toISOString()
       };
       
-      // Write to shared registry file
-      const fs = await import('fs/promises');
       await fs.mkdir('data', { recursive: true });
       
       let existingBots = [];
@@ -1066,7 +892,6 @@ export * from './types/index.js';`;
         // File doesn't exist yet
       }
       
-      // Add new bot to registry
       existingBots.push({
         name: spec.name,
         purpose: spec.purpose,
@@ -1085,3 +910,37 @@ export * from './types/index.js';`;
       console.error(`[AgentBuilder] Failed to register ${spec.name} with Commander:`, error);
     }
   }
+
+  private async commitNewAgent(spec: AgentSpec, files: string[]): Promise<void> {
+    try {
+      execSync('git add .', { stdio: 'pipe' });
+      execSync(`git commit -m "🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}"`, { stdio: 'pipe' });
+      execSync('git push origin main', { stdio: 'pipe' });
+      console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
+    } catch (error) {
+      console.error(`[AgentBuilder] Failed to commit ${spec.name}:`, error);
+    }
+  }
+
+  private fallbackAgentSpec(request: string): AgentSpec {
+    const name = request.includes('monitor') ? 'Monitor' : 
+                request.includes('deploy') ? 'Deployer' :
+                request.includes('quality') ? 'QualityChecker' : 'CustomAgent';
+    
+    return {
+      name,
+      purpose: `Agent for ${request}`,
+      capabilities: ['basic-processing'],
+      dependencies: ['@anthropic-ai/sdk'],
+      structure: {
+        core: [`${name}.ts`],
+        intelligence: [`${name}Intelligence.ts`],
+        communication: [`${name}Voice.ts`]
+      },
+      discordIntegration: true,
+      voicePersonality: 'Professional and helpful',
+      createWatcher: true,
+      watcherPurpose: `Learning optimization patterns for ${name}`
+    };
+  }
+}

@@ -24,6 +24,7 @@ export class DiscordInterface {
     });
     
     this.setupEventHandlers();
+    this.setupFeedbackReactions();
   }
 
   private setupEventHandlers(): void {
@@ -296,3 +297,21 @@ export class DiscordInterface {
     return !!this.agentChannel;
   }
 }
+
+  setupFeedbackReactions(): void {
+    this.client.on('messageReactionAdd', async (reaction, user) => {
+      if (user.bot) return;
+      if (reaction.message.author?.id !== this.client.user?.id) return;
+      
+      const emoji = reaction.emoji.name;
+      let feedbackType = null;
+      
+      if (['👍', '✅', '💯'].includes(emoji)) feedbackType = 'positive';
+      if (['👎', '❌'].includes(emoji)) feedbackType = 'negative'; 
+      if (['🔄', '⚡'].includes(emoji)) feedbackType = 'suggestion';
+      
+      if (feedbackType) {
+        console.log(`[Discord] Feedback: ${emoji} (${feedbackType})`);
+      }
+    });
+  }

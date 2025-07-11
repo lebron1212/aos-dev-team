@@ -1,10 +1,12 @@
 import { COM_L1_IntentAnalyzer } from '../intelligence/COM-L1-IntentAnalyzer.js';
 import { RequirementGatherer } from '../intelligence/RequirementGatherer.js';
+import { PRRefinementSystem } from '../intelligence/PRRefinementSystem.js';
 import { AgentOrchestrator } from './AgentOrchestrator.js';
 import { BotOrchestrator } from './BotOrchestrator.js';
 import { WorkManager } from '../workflow/WorkManager.js';
 import { DiscordInterface } from '../communication/DiscordInterface.js';
 import { VoiceSystem } from '../communication/VoiceSystem.js';
+import { GitHubService } from '../integrations/GitHubService.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { ComWatch } from '../../watcher/comwatch/ComWatch.js';
@@ -14,6 +16,8 @@ import { ContextProvider } from '../intelligence/ContextProvider.js';
 export class UniversalRouter {
   private intentAnalyzer: COM_L1_IntentAnalyzer;
   private requirementGatherer: RequirementGatherer;
+  private prRefinementSystem: PRRefinementSystem;
+  private githubService: GitHubService;
   private agentOrchestrator: AgentOrchestrator;
   private botOrchestrator: BotOrchestrator;
   private workManager: WorkManager;
@@ -27,6 +31,8 @@ export class UniversalRouter {
   constructor(config: CommanderConfig) {
     this.intentAnalyzer = new COM_L1_IntentAnalyzer(config.claudeApiKey);
     this.requirementGatherer = new RequirementGatherer(config.claudeApiKey);
+    this.prRefinementSystem = new PRRefinementSystem(config.claudeApiKey);
+    this.githubService = new GitHubService(config.githubToken);
     this.agentOrchestrator = new AgentOrchestrator(config);
     this.workManager = new WorkManager();
     this.discordInterface = new DiscordInterface(config);
@@ -267,6 +273,8 @@ export class UniversalRouter {
         return await this.voiceSystem.formatResponse(workResult, { type: 'management' });
       case 'manage-deployment':
         return await this.voiceSystem.formatResponse(`Deployment Management - ${intent.parameters.description} (Deployment features TODO)`, { type: 'action' });
+      case 'manage-pr':
+        return await this.handlePRRequest(intent, userId, messageId);
       default:
         return await this.voiceSystem.formatResponse(`Management Request - ${intent.parameters.description}`, { type: 'action' });
     }
@@ -287,6 +295,29 @@ export class UniversalRouter {
     messageId: string,
     messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
+    
+    // Check if user has an active PR refinement session - if so, route to PR handler
+    const activeSession = this.prRefinementSystem.getActiveSession(userId);
+    if (activeSession) {
+      console.log('[UniversalRouter] Active PR session found, routing conversation to PR handler');
+      const refinementResult = await this.prRefinementSystem.refineWithInput(userId, intent.parameters.description);
+      
+      if (refinementResult.cancelled) {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'info' });
+      }
+      
+      if (refinementResult.isComplete) {
+        // Check if user wants to proceed with creation
+        const input = intent.parameters.description.toLowerCase();
+        if (input.includes('yes') || input.includes('create') || input.includes('proceed')) {
+          return await this.createPRFromSession(activeSession, userId);
+        } else {
+          return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+        }
+      } else {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+      }
+    }
     
     // FIXED: Safely access messageContext from DiscordInterface
     const messageContext = (this.discordInterface as any).messageContext;
@@ -322,6 +353,90 @@ export class UniversalRouter {
       messageHistory,
       ContextProvider.getTimeContext()
     );
+  }
+
+  private async handlePRRequest(
+    intent: UniversalIntent, 
+    userId: string, 
+    messageId: string
+  ): Promise<string> {
+    
+    // Check if this is part of an ongoing PR refinement session
+    const activeSession = this.prRefinementSystem.getActiveSession(userId);
+    
+    if (activeSession) {
+      // This is a continuation of an existing session
+      const refinementResult = await this.prRefinementSystem.refineWithInput(userId, intent.parameters.description);
+      
+      if (refinementResult.cancelled) {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'info' });
+      }
+      
+      if (refinementResult.isComplete) {
+        // Check if user wants to proceed with creation
+        const input = intent.parameters.description.toLowerCase();
+        if (input.includes('yes') || input.includes('create') || input.includes('proceed')) {
+          return await this.createPRFromSession(activeSession, userId);
+        } else if (input.includes('edit') || input.includes('modify') || input.includes('change')) {
+          // Reset the session to allow editing
+          this.prRefinementSystem.cancelSession(userId);
+          const newRefinement = await this.prRefinementSystem.startRefinement(userId, intent.parameters.description);
+          return await this.voiceSystem.formatResponse(newRefinement.response, { type: 'question' });
+        } else {
+          return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+        }
+      } else {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+      }
+    } else {
+      // Start a new PR refinement session
+      const refinementResult = await this.prRefinementSystem.startRefinement(userId, intent.parameters.description);
+      
+      if (refinementResult.isComplete) {
+        // Unlikely but handle the case where the initial request has all needed info
+        const session = this.prRefinementSystem.getActiveSession(userId);
+        if (session) {
+          return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+        }
+      }
+      
+      return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+    }
+  }
+
+  private async createPRFromSession(session: any, userId: string): Promise<string> {
+    try {
+      // Ensure branch exists
+      if (session.branchName && session.repository) {
+        const branchExists = await this.githubService.validateBranchExists(session.repository, session.branchName);
+        if (!branchExists) {
+          await this.githubService.createBranch(session.repository, session.branchName);
+        }
+      }
+
+      // Create the PR
+      const prResult = await this.githubService.createPullRequest({
+        repository: session.repository,
+        title: session.title,
+        description: session.description,
+        head: session.branchName,
+        base: session.baseBranch,
+        labels: session.labels,
+        draft: session.isDraft
+      });
+
+      // Clean up the session
+      this.prRefinementSystem.cancelSession(userId);
+
+      const successMessage = `✅ Created PR #${prResult.prNumber} in ${session.repository}: ${prResult.prUrl}\n🤖 Auto-assigned to @copilot for AI-assisted review`;
+      return await this.voiceSystem.formatResponse(successMessage, { type: 'completion' });
+
+    } catch (error) {
+      console.error('[UniversalRouter] Failed to create PR:', error);
+      
+      const errorMessage = `❌ Failed to create PR: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      return await this.voiceSystem.formatResponse(errorMessage, { type: 'error' });
+    }
   }
 
   private async handleDebugRequest(input: string): Promise<string | null> {

@@ -72,7 +72,7 @@ export class DiscordBotCreator {
       });
       
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { id: string };
         console.log(`[DiscordBotCreator] Created Discord application: ${data.id}`);
         return data;
       } else {
@@ -137,13 +137,20 @@ export class DiscordBotCreator {
       const clientVar = `${agentName.toUpperCase()}_CLIENT_ID`;
       
       // Set Railway environment variables automatically
-      execSync(`railway variables --set ${tokenVar}=${config.token}`, { stdio: 'pipe' });
-      execSync(`railway variables --set ${clientVar}=${config.clientId}`, { stdio: 'pipe' });
-      
-      console.log(`[DiscordBotCreator] Set Railway environment variables for ${agentName}`);
-      
-      // Trigger Railway redeploy to pick up new variables
-      execSync('railway redeploy', { stdio: 'pipe' });
+      try {
+        execSync(`railway variables --set ${tokenVar}=${config.token}`, { stdio: 'pipe' });
+        execSync(`railway variables --set ${clientVar}=${config.clientId}`, { stdio: 'pipe' });
+        
+        console.log(`[DiscordBotCreator] Set Railway environment variables for ${agentName}`);
+        
+        // Trigger Railway redeploy to pick up new variables
+        execSync('railway redeploy', { stdio: 'pipe' });
+      } catch (railwayError) {
+        console.warn('[DiscordBotCreator] Railway CLI not available or failed, environment variables need manual setup');
+        console.log(`[DiscordBotCreator] Please set these environment variables manually:`);
+        console.log(`  ${tokenVar}=${config.token}`);
+        console.log(`  ${clientVar}=${config.clientId}`);
+      }
       
     } catch (error) {
       console.error('[DiscordBotCreator] Failed to set Railway variables:', error);
@@ -166,12 +173,16 @@ export class DiscordBotCreator {
       });
       
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { id: string };
         console.log(`[DiscordBotCreator] Created channel for ${agentName}: ${data.id}`);
         
         // Set channel ID in Railway
         const channelVar = `${agentName.toUpperCase()}_CHANNEL_ID`;
-        execSync(`railway variables --set ${channelVar}=${data.id}`, { stdio: 'pipe' });
+        try {
+          execSync(`railway variables --set ${channelVar}=${data.id}`, { stdio: 'pipe' });
+        } catch (railwayError) {
+          console.warn(`[DiscordBotCreator] Railway CLI not available, please set ${channelVar}=${data.id} manually`);
+        }
         
         return data.id;
       }

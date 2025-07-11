@@ -1,13 +1,18 @@
 import { AgentSpec } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
-import fs from 'fs/promises';
+import { promises as fs } from 'fs';
 import { execSync } from 'child_process';
+import { DiscordBotCreator } from './DiscordBotCreator.js';
 
 export class AgentBuilder {
   private claude: Anthropic;
+  private discordCreator?: DiscordBotCreator;
 
-  constructor(claudeApiKey: string) {
+  constructor(claudeApiKey: string, discordToken?: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
+    if (discordToken) {
+      this.discordCreator = new DiscordBotCreator(claudeApiKey, discordToken);
+    }
   }
 
   async parseAgentRequirements(request: string): Promise<AgentSpec> {
@@ -122,20 +127,54 @@ Always include a watcher for learning and eventual local model replacement.`
       // 8. Update main index.ts to include new agent
       await this.updateMainIndex(spec);
       
-      // 9. Register with Commander
-      if (spec.discordIntegration) {
-        await this.registerBotWithCommander(spec, 'PLACEHOLDER_CHANNEL_ID');
+      // 9. Create Discord bot if integration is enabled
+      let discordBotCreated = false;
+      let botToken = '';
+      let channelId = '';
+      let inviteUrl = '';
+      
+      if (spec.discordIntegration && this.discordCreator) {
+        console.log(`[AgentBuilder] Creating Discord bot for ${spec.name}...`);
+        const botConfig = await this.discordCreator.createDiscordBot(spec.name, spec.purpose);
+        
+        if (botConfig) {
+          discordBotCreated = true;
+          botToken = botConfig.token;
+          inviteUrl = botConfig.inviteUrl;
+          
+          // Create dedicated channel (assuming a default guild ID, this could be configured)
+          const guildId = process.env.DISCORD_GUILD_ID;
+          if (guildId) {
+            const createdChannelId = await this.discordCreator.createChannelForAgent(guildId, spec.name);
+            if (createdChannelId) {
+              channelId = createdChannelId;
+            }
+          }
+          
+          console.log(`[AgentBuilder] Discord bot created successfully for ${spec.name}`);
+        } else {
+          console.warn(`[AgentBuilder] Failed to create Discord bot for ${spec.name}, continuing without Discord integration`);
+        }
       }
       
-      // 10. Commit the new agent
+      // 10. Register with Commander
+      if (spec.discordIntegration) {
+        await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
+      }
+      
+      // 11. Commit the new agent
       await this.commitNewAgent(spec, createdFiles);
       
       return {
-        summary: `Agent ${spec.name} created with full Discord integration${spec.createWatcher ? ' and learning watcher' : ''}`,
+        summary: `Agent ${spec.name} created with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,
         files: createdFiles,
         capabilities: spec.capabilities,
         ready: true,
-        discordSetupNeeded: spec.discordIntegration,
+        discordSetupNeeded: spec.discordIntegration && !discordBotCreated,
+        discordBotCreated,
+        botToken: discordBotCreated ? botToken : undefined,
+        channelId: channelId || undefined,
+        inviteUrl: discordBotCreated ? inviteUrl : undefined,
         watcherCreated: spec.createWatcher,
         environmentVars: spec.discordIntegration ? [
           `${spec.name.toUpperCase()}_DISCORD_TOKEN`,
@@ -144,12 +183,13 @@ Always include a watcher for learning and eventual local model replacement.`
       };
       
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[AgentBuilder] Failed to build agent ${spec.name}:`, error);
       return {
-        summary: `Failed to create agent ${spec.name}: ${error.message}`,
+        summary: `Failed to create agent ${spec.name}: ${errorMessage}`,
         files: createdFiles,
         ready: false,
-        error: error.message
+        error: errorMessage
       };
     }
   }
@@ -824,7 +864,9 @@ export * from './types/index.js';`;
       }
       
       const lines = currentContent.split('\n');
-      const lastImportIndex = lines.findLastIndex(line => line.startsWith('import'));
+      const lastImportIndex = lines.map((line, index) => line.startsWith('import') ? index : -1)
+        .filter(index => index !== -1)
+        .pop() ?? -1;
       
       lines.splice(lastImportIndex + 1, 0, importLine);
       if (watcherImportLine) {

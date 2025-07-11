@@ -1,17 +1,11 @@
 import { Commander } from './agents/commander/Commander.js';
 import { Architect } from './agents/architect/Architect.js';
+import { Dashboard } from './agents/dashboard/Dashboard.js';
 
 console.log('🚀 Starting AI Development Team...');
 
 async function startCommander() {
-  const commanderConfig = {
-    discordToken: process.env.DISCORD_TOKEN!,
-    userChannelId: process.env.USER_CHANNEL_ID!,
-    agentChannelId: process.env.AGENT_CHANNEL_ID!,
-    claudeApiKey: process.env.CLAUDE_API_KEY!
-  };
-
-  const commander = new Commander(commanderConfig);
+  const commander = new Commander();
   await commander.start();
 }
 
@@ -30,8 +24,25 @@ async function startArchitect() {
   }
 }
 
-// Start both systems
+async function startDashboard() {
+  const dashboardConfig = {
+    dashboardToken: process.env.DASHBOARD_DISCORD_TOKEN!,
+    dashboardChannelId: process.env.DASHBOARD_CHANNEL_ID!,
+    agentCoordinationChannelId: process.env.AGENT_COORDINATION_CHANNEL_ID || '1393086808866426930',
+    claudeApiKey: process.env.CLAUDE_API_KEY!
+  };
+
+  if (dashboardConfig.dashboardToken && dashboardConfig.dashboardChannelId) {
+    const dashboard = new Dashboard(dashboardConfig);
+    await dashboard.start();
+  } else {
+    console.log('[Dashboard] Environment variables not set, skipping dashboard startup');
+  }
+}
+
+// Start all systems
 Promise.all([
   startCommander(),
-  startArchitect()
+  startArchitect(),
+  startDashboard()
 ]).catch(console.error);

@@ -259,7 +259,7 @@ ${intent.subcategory === 'conversation-offtopic' ? 'This seems off-topic from de
       const response = await this.claude.messages.create({
         model: 'claude-3-opus-20240229',
         max_tokens: 300,
-        system: VoiceSystem.getSystemPrompt(),
+        system: VoiceSystem.getSystemPrompt(), // Use our actual system prompt!
         messages: [{ role: 'user', content: conversationPrompt }]
       });
       

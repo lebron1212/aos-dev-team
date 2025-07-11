@@ -6,7 +6,6 @@ export class DiscordInterface {
   private userChannel: TextChannel | null = null;
   private agentChannel: TextChannel | null = null;
   private config: CommanderConfig;
-  
   private workItemEmbeds: Map<string, Message> = new Map();
   private workItemThreads: Map<string, ThreadChannel> = new Map();
 
@@ -21,7 +20,6 @@ export class DiscordInterface {
         GatewayIntentBits.GuildVoiceStates
       ]
     });
-    
     this.setupEventHandlers();
     this.setupFeedbackReactions();
   }
@@ -29,16 +27,13 @@ export class DiscordInterface {
   private setupEventHandlers(): void {
     this.client.once('ready', async () => {
       console.log(`[DiscordInterface] Connected as ${this.client.user?.tag}`);
-      
       this.userChannel = this.client.channels.cache.get(this.config.userChannelId) as TextChannel;
       this.agentChannel = this.client.channels.cache.get(this.config.agentChannelId) as TextChannel;
-      
       this.client.user?.setPresence({
         activities: [{ name: 'Building with AI', type: 3 }],
         status: 'online'
       });
     });
-
     this.client.on('error', (error) => {
       console.error('[DiscordInterface] Client error:', error);
     });
@@ -62,9 +57,12 @@ export class DiscordInterface {
     });
   }
 
+  async setupVMTIntegration(): Promise<void> {
+    console.log('[DiscordInterface] VMT integration setup TODO');
+  }
+
   async sendMessage(content: string): Promise<Message | null> {
     if (!this.userChannel) return null;
-    
     try {
       return await this.userChannel.send(content);
     } catch (error) {
@@ -85,7 +83,3 @@ export class DiscordInterface {
     return !!this.userChannel;
   }
 }
-
-  async setupVMTIntegration(): Promise<void> {
-    console.log('[DiscordInterface] VMT integration setup TODO');
-  }

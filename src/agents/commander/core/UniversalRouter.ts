@@ -75,7 +75,7 @@ export class UniversalRouter {
           response = await this.handleConversationRequest(intent, userId, messageId, messageHistory);
           break;
         default:
-          response = `Not sure how to handle that request. Could you rephrase it?`;
+          response = await this.voiceSystem.formatResponse("Not sure how to handle that request. Could you rephrase it?", { type: 'error' });
       }
       
       await this.discordInterface.updateTrackedMessage(messageId, response);
@@ -85,7 +85,7 @@ export class UniversalRouter {
       
     } catch (error) {
       console.error('[UniversalRouter] Error:', error);
-      return `× System error processing request. Please try again or rephrase.`;
+      return await this.voiceSystem.formatResponse("System error processing request. Please try again or rephrase.", { type: 'error' });
     }
   }
 
@@ -170,7 +170,12 @@ export class UniversalRouter {
     
     const result = await this.agentOrchestrator.executeWork(modificationItem);
     
-    return `◆ Modifying ${workItem.id}\n→ ${result.message}`;
+    const modifyResponse = await this.voiceSystem.formatResponse(
+      `Modifying ${workItem.id} - ${result.message}`,
+      { type: 'action' }
+    );
+    
+    return `◆ ${modifyResponse}`;
   }
 
   private async handleAnalyzeRequest(
@@ -181,13 +186,13 @@ export class UniversalRouter {
     
     switch (intent.subcategory) {
       case 'analyze-health':
-        return await this.voiceSystem.formatResponse("Project Health Analysis\n→ Analyzing codebase health...\n(CodeAnalyzer agent TODO)", { type: 'action' });
+        return await this.voiceSystem.formatResponse("Project Health Analysis - Analyzing codebase health (CodeAnalyzer agent TODO)", { type: 'action' });
       case 'analyze-performance':
-        return await this.voiceSystem.formatResponse("Performance Analysis\n→ Analyzing performance metrics...\n(PerformanceAnalyzer agent TODO)", { type: 'action' });
+        return await this.voiceSystem.formatResponse("Performance Analysis - Analyzing performance metrics (PerformanceAnalyzer agent TODO)", { type: 'action' });
       case 'analyze-code':
-        return await this.voiceSystem.formatResponse("Code Analysis\n→ Reviewing code quality...\n(CodeAnalyzer agent TODO)", { type: 'action' });
+        return await this.voiceSystem.formatResponse("Code Analysis - Reviewing code quality (CodeAnalyzer agent TODO)", { type: 'action' });
       default:
-        return await this.voiceSystem.formatResponse(`Analysis Request\n→ ${intent.parameters.description}\n(Analysis agents TODO)`, { type: 'action' });
+        return await this.voiceSystem.formatResponse(`Analysis Request - ${intent.parameters.description} (Analysis agents TODO)`, { type: 'action' });
     }
   }
 
@@ -199,11 +204,12 @@ export class UniversalRouter {
     
     switch (intent.subcategory) {
       case 'manage-work':
-        return await this.workManager.handleWorkManagement(intent, userId);
+        const workResult = await this.workManager.handleWorkManagement(intent, userId);
+        return await this.voiceSystem.formatResponse(workResult, { type: 'management' });
       case 'manage-deployment':
-        return await this.voiceSystem.formatResponse(`Deployment Management\n→ ${intent.parameters.description}\n(Deployment features TODO)`, { type: 'action' });
+        return await this.voiceSystem.formatResponse(`Deployment Management - ${intent.parameters.description} (Deployment features TODO)`, { type: 'action' });
       default:
-        return await this.voiceSystem.formatResponse(`Management Request\n→ ${intent.parameters.description}`, { type: 'action' });
+        return await this.voiceSystem.formatResponse(`Management Request - ${intent.parameters.description}`, { type: 'action' });
     }
   }
 
@@ -213,7 +219,7 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    return await this.voiceSystem.formatResponse(`Question: ${intent.parameters.description}\nI can help with development questions!\n(Educational agent TODO)`, { type: 'question' });
+    return await this.voiceSystem.formatResponse(`Question: ${intent.parameters.description} - I can help with development questions (Educational agent TODO)`, { type: 'question' });
   }
 
   private async handleConversationRequest(
@@ -225,6 +231,7 @@ export class UniversalRouter {
     
     const messageContext = (this.discordInterface as any).messageContext;
     
+    // Handle feedback through VoiceSystem
     if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
       const lastMessage = messageContext ? Array.from(messageContext.values()).pop() : null;
       if (lastMessage) {
@@ -240,7 +247,12 @@ export class UniversalRouter {
         
         await this.comWatch.logCommanderInteraction(lastMessage.input, lastMessage.response, [], intent.parameters.description);
         
-        return await this.voiceSystem.formatResponse("Got it. Learning from that.", { type: 'acknowledgment' });
+        // Use VoiceSystem to generate contextual feedback acknowledgment
+        return await this.voiceSystem.generateFeedbackResponse(
+          intent.parameters.description,
+          lastMessage.response,
+          suggestion
+        );
       }
     }
    

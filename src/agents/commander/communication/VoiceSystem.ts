@@ -48,33 +48,7 @@ AVOID: Clichés, over-explanation, trying too hard, corporate speak`;
   }
 
   async formatResponse(content: string, options: { type?: string, workItemId?: string } = {}): Promise<string> {
-    const learningExamples = this.feedbackSystem.generateLearningExamples();
-    
-    try {
-      const response = await this.claude.messages.create({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 80,
-        system: VoiceSystem.getSystemPrompt(learningExamples),
-        messages: [{
-          role: 'user',
-          content: `Transform this into the Commander's voice - sharp, minimal, quietly confident:
-
-"${content}"
-
-Context: ${options.type || 'general'}
-Make it precise and understated. Under 8 words if possible.`
-        }]
-      });
-      
-      const voiceContent = response.content[0];
-      if (voiceContent.type === 'text') {
-        return this.refineResponse(voiceContent.text);
-      }
-    } catch (error) {
-      console.error('[VoiceSystem] AI formatting failed, using fallback');
-    }
-    
-    return this.refineResponse(content);
+    return await this.generateResponse(content, options.type || 'general');
   }
 
   async generateConversationResponse(
@@ -88,39 +62,69 @@ Make it precise and understated. Under 8 words if possible.`
       .map(msg => `${msg.author}: ${msg.content}`)
       .join('\n');
     
-    const learningExamples = this.feedbackSystem.generateLearningExamples();
-    
-    const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
-
-Recent conversation:
+    const contextPrompt = `Context: It's ${timeContext}. Recent conversation:
 ${recentConversation}
 
-Current user message: "${input}"
+User message: "${input}"
 
-Respond appropriately to the conversation context. Be brief, professional, and contextually aware.`;
+Respond in Commander's voice - contextually aware, brief, with subtle personality.`;
 
+    return await this.generateResponse(contextPrompt, 'conversation');
+  }
+
+  async generateFeedbackResponse(
+    feedbackText: string,
+    originalResponse: string,
+    suggestion?: string
+  ): Promise<string> {
+    
+    const feedbackPrompt = `User gave feedback about your response: "${feedbackText}"
+Original response: "${originalResponse}"
+${suggestion ? `Specific suggestion: "${suggestion}"` : ''}
+
+Acknowledge the feedback in Commander's voice - brief, professional, shows you're learning without being defensive.`;
+
+    return await this.generateResponse(feedbackPrompt, 'feedback');
+  }
+
+  private async generateResponse(content: string, type: string): Promise<string> {
+    const learningExamples = this.feedbackSystem.generateLearningExamples();
+    
     try {
       const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
-        max_tokens: 120,
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 80,
         system: VoiceSystem.getSystemPrompt(learningExamples),
-        messages: [{ role: 'user', content: conversationPrompt }]
+        messages: [{
+          role: 'user',
+          content: `${content}
+
+Context type: ${type}
+Respond in Commander's voice - under 8 words if possible, precise and understated.`
+        }]
       });
       
-      const content = response.content[0];
-      if (content.type === 'text') {
-        return this.refineResponse(content.text);
+      const voiceContent = response.content[0];
+      if (voiceContent.type === 'text') {
+        return this.refineResponse(voiceContent.text);
       }
     } catch (error) {
-      console.error('[VoiceSystem] Conversation response failed:', error);
+      console.error(`[VoiceSystem] AI generation failed for ${type}:`, error);
     }
     
-    return "Ready when you are.";
+    // Fallback based on type
+    switch (type) {
+      case 'feedback': return 'Noted. Adapting.';
+      case 'conversation': return 'Ready when you are.';
+      case 'error': return 'Problem noted. Investigating.';
+      default: return 'Understood.';
+    }
   }
 
   private refineResponse(response: string): string {
     return response
-      .replace(/\*[^*]*\*/g, '')
+      .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+      .replace(/\*[^*]*\*/g, '') // Remove asterisks/actions
       .replace(/systems nominal/gi, 'Ready')
       .replace(/all systems go/gi, 'Ready')
       .replace(/firing on all cylinders/gi, 'Running smooth')

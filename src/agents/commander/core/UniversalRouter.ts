@@ -296,6 +296,29 @@ export class UniversalRouter {
     messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
+    // Check if user has an active PR refinement session - if so, route to PR handler
+    const activeSession = this.prRefinementSystem.getActiveSession(userId);
+    if (activeSession) {
+      console.log('[UniversalRouter] Active PR session found, routing conversation to PR handler');
+      const refinementResult = await this.prRefinementSystem.refineWithInput(userId, intent.parameters.description);
+      
+      if (refinementResult.cancelled) {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'info' });
+      }
+      
+      if (refinementResult.isComplete) {
+        // Check if user wants to proceed with creation
+        const input = intent.parameters.description.toLowerCase();
+        if (input.includes('yes') || input.includes('create') || input.includes('proceed')) {
+          return await this.createPRFromSession(activeSession, userId);
+        } else {
+          return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+        }
+      } else {
+        return await this.voiceSystem.formatResponse(refinementResult.response, { type: 'question' });
+      }
+    }
+    
     // FIXED: Safely access messageContext from DiscordInterface
     const messageContext = (this.discordInterface as any).messageContext;
     

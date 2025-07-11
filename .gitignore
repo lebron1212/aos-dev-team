@@ -2,4 +2,7 @@ node_modules/
 package-lock.json
 .DS_Store
 .env
-.env
+
+# Test and demo files
+test-*.ts
+demo-*.ts

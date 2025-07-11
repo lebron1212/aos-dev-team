@@ -253,8 +253,7 @@ export class UniversalRouter {
     const timeContext = ContextProvider.getTimeContext();
    const systemStatus = ContextProvider.getSystemStatus();
    
-   const conversationPrompt = `Time: ${timeContext}
-System: ${systemStatus}
+   const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 Recent conversation:
 ${recentConversation}
 

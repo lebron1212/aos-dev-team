@@ -6,6 +6,7 @@ export class ArchitectDiscord {
   private architectChannel: TextChannel | null = null;
   private config: ArchitectConfig;
   private messageHandlers: Array<(message: Message) => Promise<void>> = [];
+  private messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
 
   constructor(config: ArchitectConfig) {
     this.config = config;
@@ -35,10 +36,26 @@ export class ArchitectDiscord {
       if (message.author.bot) return;
       if (message.channelId !== this.config.architectChannelId) return;
       
+      // Track all messages for context
+      this.messageHistory.push({
+        content: message.content,
+        author: message.author.username,
+        timestamp: new Date()
+      });
+      
+      // Keep only recent messages (last 50)
+      if (this.messageHistory.length > 50) {
+        this.messageHistory = this.messageHistory.slice(-50);
+      }
+      
       for (const handler of this.messageHandlers) {
         await handler(message);
       }
     });
+  }
+
+  async getRecentMessages(count: number = 10): Promise<Array<{content: string, author: string, timestamp: Date}>> {
+    return this.messageHistory.slice(-count);
   }
 
   onMessage(handler: (message: Message) => Promise<void>): void {

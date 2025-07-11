@@ -29,7 +29,7 @@ export class ArchitectOrchestrator {
     }
   }
 
-  async executeArchitecturalWork(request: ArchitecturalRequest): Promise<string> {
+  async executeArchitecturalWork(request: ArchitecturalRequest, context?: any): Promise<string> {
     
     console.log(`[ArchitectOrchestrator] Executing: ${request.type} - ${request.description}`);
     
@@ -49,23 +49,23 @@ export class ArchitectOrchestrator {
     
     switch (request.type) {
       case 'code-analysis':
-        return await this.handleCodeAnalysis(request);
+        return await this.handleCodeAnalysis(request, context);
       case 'system-modification':
-        return await this.handleSystemModification(request);
+        return await this.handleSystemModification(request, context);
       case 'agent-creation':
-        return await this.handleAgentCreation(request);
+        return await this.handleAgentCreation(request, context);
       case 'behavior-refinement':
-        return await this.handleBehaviorRefinement(request);
+        return await this.handleBehaviorRefinement(request, context);
       case 'system-status':
-        return await this.handleSystemStatus(request);
+        return await this.handleSystemStatus(request, context);
       case 'discord-bot-setup':
-        return await this.handleDiscordBotSetup(request);
+        return await this.handleDiscordBotSetup(request, context);
       default:
         return await this.voice.formatResponse("Unknown architectural request type. Please clarify.", { type: 'error' });
     }
   }
 
-  private async handleCodeAnalysis(request: ArchitecturalRequest): Promise<string> {
+  private async handleCodeAnalysis(request: ArchitecturalRequest, context?: any): Promise<string> {
     const analysis = await this.codeAnalyzer.analyzeCodebase(request.description);
     
     const summary = `Analysis: ${analysis.summary}
@@ -77,7 +77,7 @@ Health: ${analysis.healthScore}%`;
     return await this.voice.formatResponse(summary, { type: 'analysis' });
   }
 
-  private async handleSystemModification(request: ArchitecturalRequest): Promise<string> {
+  private async handleSystemModification(request: ArchitecturalRequest, context?: any): Promise<string> {
     const plan = await this.modifier.planModification(request.description);
     
     if (plan.requiresApproval) {
@@ -93,7 +93,7 @@ Health: ${analysis.healthScore}%`;
     }
   }
 
-  private async handleAgentCreation(request: ArchitecturalRequest): Promise<string> {
+  private async handleAgentCreation(request: ArchitecturalRequest, context?: any): Promise<string> {
     const agentSpec = await this.builder.parseAgentRequirements(request.description);
     const buildResult = await this.builder.generateAgent(agentSpec);
     
@@ -107,17 +107,40 @@ Health: ${analysis.healthScore}%`;
     }
   }
 
-  private async handleBehaviorRefinement(request: ArchitecturalRequest): Promise<string> {
+  private async handleBehaviorRefinement(request: ArchitecturalRequest, context?: any): Promise<string> {
     const refinement = await this.refiner.refineBehavior(request.description);
     return await this.voice.formatResponse(`Behavior refinement: ${refinement.summary}`, { type: 'refinement' });
   }
 
-  private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
+  private async handleSystemStatus(request: ArchitecturalRequest, context?: any): Promise<string> {
     const status = await this.codeAnalyzer.getSystemHealth();
-    return await this.voice.formatResponse(`System status: ${status.summary}. ${status.issues.length > 0 ? 'Issues: ' + status.issues.join(', ') : 'All systems operational.'}`, { type: 'status' });
+    
+    // Build specific, actionable response
+    let response = `System Analysis Results:\n\n`;
+    
+    if (status.issues.length > 0) {
+      response += `🚨 SPECIFIC ISSUES FOUND:\n`;
+      status.issues.forEach((issue: string, i: number) => {
+        response += `${i + 1}. ${issue}\n`;
+      });
+    } else {
+      response += `✅ No critical issues detected\n`;
+    }
+    
+    if (status.suggestions.length > 0) {
+      response += `\n💡 SPECIFIC RECOMMENDATIONS:\n`;
+      status.suggestions.forEach((suggestion: string, i: number) => {
+        response += `${i + 1}. ${suggestion}\n`;
+      });
+    }
+    
+    response += `\n📊 Health Score: ${status.healthScore}%`;
+    response += `\n⚠️ I CANNOT automatically fix these issues. Manual intervention required.`;
+    
+    return await this.voice.formatResponse(response, { type: 'analysis' });
   }
 
-  private async handleDiscordBotSetup(request: ArchitecturalRequest): Promise<string> {
+  private async handleDiscordBotSetup(request: ArchitecturalRequest, context?: any): Promise<string> {
     console.log(`[ArchitectOrchestrator] Setting up Discord bot: ${request.description}`);
     
     if (!this.discordCreator) {

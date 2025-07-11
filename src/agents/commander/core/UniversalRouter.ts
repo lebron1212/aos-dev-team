@@ -279,7 +279,7 @@ export class UniversalRouter {
 
     // Check if this is feedback about a previous response
     if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
-      const lastMessage = Array.from(this.messageContext.values()).pop();
+      const lastMessage = Array.from((this.discordInterface as any).messageContext?.values() || []).pop();
       if (lastMessage) {
         const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, lastMessage.response);
         await this.feedbackSystem.logFeedback(

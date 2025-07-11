@@ -105,6 +105,36 @@ Be specific and actionable.`,
     }
   }
 
+  // Legacy method for compatibility with ArchitectOrchestrator
+  async getSystemHealth(): Promise<any> {
+    console.log('[CodeAnalyzer] 🔄 Using legacy getSystemHealth method, calling analyzeSystemHealth...');
+    try {
+      const result = await this.analyzeSystemHealth();
+      return {
+        status: 'healthy',
+        summary: result.summary,
+        issues: result.issues,
+        recommendations: result.recommendations,
+        complexity: result.metrics.complexityScore,
+        filesAnalyzed: result.metrics.filesAnalyzed,
+        apiCost: result.apiUsage.cost,
+        tokens: result.apiUsage.tokens
+      };
+    } catch (error) {
+      console.error('[CodeAnalyzer] ❌ getSystemHealth failed:', error);
+      return {
+        status: 'error',
+        summary: 'System health check failed',
+        issues: ['Health analysis unavailable'],
+        recommendations: ['Retry analysis'],
+        complexity: 5,
+        filesAnalyzed: 0,
+        apiCost: 0,
+        tokens: 0
+      };
+    }
+  }
+
   private async findRelevantFiles(basePath: string): Promise<string[]> {
     const files: string[] = [];
     
@@ -173,36 +203,5 @@ Be specific and actionable.`,
       totalTokens: this.totalAPIUsage.tokens,
       totalCost: this.totalAPIUsage.cost
     };
-  }
-}
-
-  // Legacy method for compatibility with ArchitectOrchestrator
-  async getSystemHealth(): Promise<any> {
-    console.log('[CodeAnalyzer] 🔄 Using legacy getSystemHealth method, calling analyzeSystemHealth...');
-    try {
-      const result = await this.analyzeSystemHealth();
-      return {
-        status: 'healthy',
-        summary: result.summary,
-        issues: result.issues,
-        recommendations: result.recommendations,
-        complexity: result.metrics.complexityScore,
-        filesAnalyzed: result.metrics.filesAnalyzed,
-        apiCost: result.apiUsage.cost,
-        tokens: result.apiUsage.tokens
-      };
-    } catch (error) {
-      console.error('[CodeAnalyzer] ❌ getSystemHealth failed:', error);
-      return {
-        status: 'error',
-        summary: 'System health check failed',
-        issues: ['Health analysis unavailable'],
-        recommendations: ['Retry analysis'],
-        complexity: 5,
-        filesAnalyzed: 0,
-        apiCost: 0,
-        tokens: 0
-      };
-    }
   }
 }

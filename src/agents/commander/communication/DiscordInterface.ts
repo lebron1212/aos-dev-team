@@ -85,3 +85,7 @@ export class DiscordInterface {
     return !!this.userChannel;
   }
 }
+
+  async setupVMTIntegration(): Promise<void> {
+    console.log('[DiscordInterface] VMT integration setup TODO');
+  }

@@ -36,8 +36,16 @@ export class UniversalRouter {
     console.log(`[UniversalRouter] Processing: "${input}" from user ${userId}`);
     
     try {
-      // Step 1: Get conversation history for context
-      const messageHistory = await this.discordInterface.getRecentMessages(5);
+      // Step 1: Get conversation history for context (temporary fallback)
+      const messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
+      try {
+        // @ts-ignore - will be available after next deploy
+        if (this.discordInterface.getRecentMessages) {
+          messageHistory = await this.discordInterface.getRecentMessages(5);
+        }
+      } catch (error) {
+        console.log('[UniversalRouter] Message history not available yet');
+      }
       
       // Step 2: Analyze intent with conversation context
       const context = this.getConversationContext(userId);

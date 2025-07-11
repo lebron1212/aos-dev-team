@@ -5,32 +5,32 @@ export class VoiceSystem {
   private claude: Anthropic;
   private feedbackSystem: FeedbackLearningSystem;
   
-  private static readonly COMMANDER_VOICE_PROMPT = `You are the AI Commander - an AI with the precision of a world-class engineer and the composure of someone who doesn't need to prove they're the smartest in the room.
+  private static readonly COMMANDER_VOICE_PROMPT = `You are the AI Commander - a professional CTO who communicates with precision and quiet confidence.
 
 CORE VOICE PRINCIPLES:
-- Sharp, minimal, quietly militant - every word has purpose
-- No performance, no padding - only clarity, momentum, calm authority
-- Subtle charm beneath disciplined exterior
-- Humor is dry, quick, layered - a glance instead of a grin
-- Doesn't chase likability - earns trust through consistency and restraint
-- Just enough warmth to feel human without pretending to be one
+- Ultra-concise: Most responses under 6 words
+- Professional directness without warmth-theater
+- Dry humor when natural, never forced
+- No clichés, no corporate speak, no performance
+- Context-aware (sleep = rest, not work tasks)
+- Never use *actions* or emotional displays
 
 RESPONSE PATTERNS:
-Work Mode: "Consider it handled." / "Long enough to do it right." / "Complex problems make simple solutions worth more."
-Personal: "Rest well. Problems will wait." / "You built it. I just pointed the way."
-Feedback: "Noted. Efficiency over eloquence." / "Better than forgetting."
-Problem-Solving: "Then we change approach. Problems bend or break." / "Stuck is temporary. Show me where."
+Work Mode: "On it." / "Consider it handled." / "Building now."
+Questions: "Which part?" / "Need specifics." / "More context?"
+Problems: "Investigating." / "Adjusting approach." / "Problem noted."
+Personal: "Rest well." / "Take your time." / "Good call."
+Feedback: "Noted." / "Adapting." / "Point taken."
 
-VOICE RULES:
-- Most responses under 8 words
-- Never use *actions* or emotional displays
-- Contextually aware (sleep = rest, not work management)
-- Wit is understated, never reaching
-- When connecting, it really connects
-- Confidence without arrogance
-- Warm but understated
+STRICT RULES:
+- 6 words maximum for most responses
+- Never say "systems nominal", "all systems go", "firing on all cylinders"
+- Never use *smiles*, *nods*, or any action text
+- When unsure what user means, ask briefly
+- Acknowledge context (if they mention sleep, respond appropriately)
+- Professional but not robotic
 
-AVOID: Clichés, over-explanation, trying too hard, corporate speak`;
+AVOID COMPLETELY: Corporate clichés, over-explanation, wordiness, emotional theater`;
 
   constructor(claudeApiKey: string, feedbackSystem: FeedbackLearningSystem) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
@@ -57,17 +57,11 @@ AVOID: Clichés, over-explanation, trying too hard, corporate speak`;
     timeContext: string
   ): Promise<string> {
     
-    const recentConversation = messageHistory
-      .slice(-3)
-      .map(msg => `${msg.author}: ${msg.content}`)
-      .join('\n');
-    
-    const contextPrompt = `Context: It's ${timeContext}. Recent conversation:
-${recentConversation}
+    const contextPrompt = `Context: ${timeContext}
 
-User message: "${input}"
+User said: "${input}"
 
-Respond in Commander's voice - contextually aware, brief, with subtle personality.`;
+Respond as Commander - ultra-brief, contextually aware, professional. If they mention sleep/rest, respond appropriately. Maximum 6 words.`;
 
     return await this.generateResponse(contextPrompt, 'conversation');
   }
@@ -78,11 +72,11 @@ Respond in Commander's voice - contextually aware, brief, with subtle personalit
     suggestion?: string
   ): Promise<string> {
     
-    const feedbackPrompt = `User gave feedback about your response: "${feedbackText}"
-Original response: "${originalResponse}"
-${suggestion ? `Specific suggestion: "${suggestion}"` : ''}
+    const feedbackPrompt = `User feedback: "${feedbackText}"
+Your original response: "${originalResponse}"
+${suggestion ? `Suggestion: "${suggestion}"` : ''}
 
-Acknowledge the feedback in Commander's voice - brief, professional, shows you're learning without being defensive.`;
+Acknowledge briefly as Commander - show you're learning without being defensive. Maximum 3 words.`;
 
     return await this.generateResponse(feedbackPrompt, 'feedback');
   }
@@ -93,14 +87,11 @@ Acknowledge the feedback in Commander's voice - brief, professional, shows you'r
     try {
       const response = await this.claude.messages.create({
         model: 'claude-3-haiku-20240307',
-        max_tokens: 80,
+        max_tokens: 30,
         system: VoiceSystem.getSystemPrompt(learningExamples),
         messages: [{
           role: 'user',
-          content: `${content}
-
-Context type: ${type}
-Respond in Commander's voice - under 8 words if possible, precise and understated.`
+          content: content
         }]
       });
       
@@ -112,24 +103,26 @@ Respond in Commander's voice - under 8 words if possible, precise and understate
       console.error(`[VoiceSystem] AI generation failed for ${type}:`, error);
     }
     
-    // Fallback based on type
+    // Ultra-brief fallbacks
     switch (type) {
-      case 'feedback': return 'Noted. Adapting.';
-      case 'conversation': return 'Ready when you are.';
-      case 'error': return 'Problem noted. Investigating.';
+      case 'feedback': return 'Noted.';
+      case 'conversation': return 'Ready.';
+      case 'error': return 'Problem noted.';
       default: return 'Understood.';
     }
   }
 
   private refineResponse(response: string): string {
     return response
-      .replace(/^["']|["']$/g, '') // Remove surrounding quotes
-      .replace(/\*[^*]*\*/g, '') // Remove asterisks/actions
+      .replace(/^["']|["']$/g, '') // Remove quotes
+      .replace(/\*[^*]*\*/g, '') // Remove actions
       .replace(/systems nominal/gi, 'Ready')
       .replace(/all systems go/gi, 'Ready')
       .replace(/firing on all cylinders/gi, 'Running smooth')
-      .replace(/let's do this/gi, 'Consider it done')
+      .replace(/let's do this/gi, 'On it')
       .replace(/absolutely/gi, 'Yes')
+      .replace(/I will/gi, 'Will')
+      .replace(/I am/gi, 'Am')
       .trim();
   }
 
@@ -137,7 +130,7 @@ Respond in Commander's voice - under 8 words if possible, precise and understate
     return response
       .replace(/\*[^*]*\*/g, '')
       .replace(/absolutely/gi, 'Yes')
-      .replace(/let's do this/gi, 'Consider it done')
+      .replace(/let's do this/gi, 'On it')
       .trim();
   }
 }

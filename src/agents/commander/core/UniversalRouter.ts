@@ -126,7 +126,6 @@ export class UniversalRouter {
     }
     
     if (lowerInput.includes('register bot') || lowerInput.includes('add bot')) {
-      // This would be called by newly created bots to register themselves
       return await this.voiceSystem.formatResponse("Bots register automatically when created by the Architect.", { type: 'info' });
     }
     
@@ -145,12 +144,10 @@ export class UniversalRouter {
     return null;
   }
 
-  // Method for newly created bots to register themselves
   async registerNewBot(name: string, purpose: string, capabilities: string[], channelId: string): Promise<void> {
     await this.botOrchestrator.registerBot(name, purpose, capabilities, channelId);
   }
 
-  // Keep all existing methods from the previous version...
   private async handleBuildRequest(
     intent: UniversalIntent, 
     userId: string, 
@@ -291,10 +288,14 @@ export class UniversalRouter {
     messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
+    // FIXED: Safely access messageContext from DiscordInterface
     const messageContext = (this.discordInterface as any).messageContext;
     
     if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
-      const lastMessage = messageContext ? Array.from(messageContext.values()).pop() : null;
+      // FIXED: Safe access with null check
+      const lastMessage = messageContext && messageContext.size > 0 ? 
+        Array.from(messageContext.values()).pop() : null;
+        
       if (lastMessage) {
         const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, lastMessage.response);
         await this.feedbackSystem.logFeedback(
@@ -323,7 +324,6 @@ export class UniversalRouter {
     );
   }
 
-  // Keep all debug and utility methods from previous version...
   private async handleDebugRequest(input: string): Promise<string | null> {
     const lowerInput = input.toLowerCase();
     

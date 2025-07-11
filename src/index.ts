@@ -13,7 +13,8 @@ async function startArchitect() {
   const architectConfig = {
     architectToken: process.env.ARCHITECT_DISCORD_TOKEN!,
     architectChannelId: process.env.ARCHITECT_CHANNEL_ID!,
-    claudeApiKey: process.env.CLAUDE_API_KEY!
+    claudeApiKey: process.env.CLAUDE_API_KEY!,
+    discordToken: process.env.DISCORD_TOKEN // Use main Discord token for creating applications
   };
 
   if (architectConfig.architectToken && architectConfig.architectChannelId) {

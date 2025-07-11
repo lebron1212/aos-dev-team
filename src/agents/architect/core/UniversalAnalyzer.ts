@@ -35,11 +35,13 @@ ARCHITECTURAL REQUEST TYPES:
 - agent-creation: Creating new AI agents or components
 - behavior-refinement: Adjusting AI personalities, responses, or learning
 - system-status: Checking system health, performance, or status
+- discord-bot-setup: Setting up Discord bot for existing agents
 
 ENHANCED INTELLIGENCE PATTERNS:
 - Configuration queries: "What's X setting?", "How many Y?", "Current Z value?"
 - Targeted modifications: "Change X to Y", "Increase Z", "Tone down A"
 - Feature analysis: "How does X work?", "Show me Y implementation"
+- Discord bot setup: "Set up Discord bot for X", "Create Discord integration for Y agent"
 
 Respond in JSON format:
 {
@@ -84,6 +86,23 @@ Respond in JSON format:
   private async tryIntelligentClassification(input: string): Promise<ArchitecturalRequest | null> {
     const lowerInput = input.toLowerCase();
     
+    // Check for Discord bot setup first (before other classifications)
+    const isDiscordBotSetup = lowerInput.includes('set up discord bot') || 
+                             lowerInput.includes('setup discord bot') || 
+                             lowerInput.includes('create discord bot') || 
+                             lowerInput.includes('discord integration') ||
+                             (lowerInput.includes('discord') && lowerInput.includes('bot') && 
+                              (lowerInput.includes('set up') || lowerInput.includes('setup') || lowerInput.includes('create')));
+    
+    if (isDiscordBotSetup) {
+      return {
+        type: 'discord-bot-setup',
+        description: input,
+        priority: 'medium',
+        riskLevel: 'medium'
+      };
+    }
+    
     // Detect code intelligence patterns
     const isConfigQuery = lowerInput.includes('what\'s') || lowerInput.includes('current') || 
                          lowerInput.includes('how many') || lowerInput.includes('show me');
@@ -91,7 +110,7 @@ Respond in JSON format:
     const isModification = lowerInput.includes('change') || lowerInput.includes('modify') || 
                           lowerInput.includes('increase') || lowerInput.includes('decrease') ||
                           lowerInput.includes('tone down') || lowerInput.includes('make') ||
-                          lowerInput.includes('set') || lowerInput.includes('update');
+                          lowerInput.includes('update');
     
     const isAnalysis = lowerInput.includes('how does') || lowerInput.includes('analyze') ||
                       lowerInput.includes('explain') || lowerInput.includes('implementation');
@@ -135,6 +154,10 @@ Respond in JSON format:
       riskLevel = 'high';
     } else if (lowerInput.includes('behavior') || lowerInput.includes('personality') || lowerInput.includes('voice')) {
       type = 'behavior-refinement';
+      riskLevel = 'medium';
+    } else if (lowerInput.includes('set up discord bot') || lowerInput.includes('setup discord bot') || 
+               lowerInput.includes('create discord bot') || lowerInput.includes('discord integration')) {
+      type = 'discord-bot-setup';
       riskLevel = 'medium';
     }
     

@@ -5,6 +5,7 @@ import { AgentBuilder } from '../operations/AgentBuilder.js';
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
 import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
+import { DiscordBotCreator } from '../operations/DiscordBotCreator.js';
 
 export class ArchitectOrchestrator {
   private codeAnalyzer: CodeAnalyzer;
@@ -13,14 +14,19 @@ export class ArchitectOrchestrator {
   private refiner: SystemRefiner;
   private voice: ArchitectVoice;
   private intelligence: CodeIntelligence;
+  private discordCreator?: DiscordBotCreator;
 
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
-    this.builder = new AgentBuilder(config.claudeApiKey);
+    this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.intelligence = new CodeIntelligence(config.claudeApiKey);
+    
+    if (config.discordToken) {
+      this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.discordToken);
+    }
   }
 
   async executeArchitecturalWork(request: ArchitecturalRequest): Promise<string> {
@@ -52,6 +58,8 @@ export class ArchitectOrchestrator {
         return await this.handleBehaviorRefinement(request);
       case 'system-status':
         return await this.handleSystemStatus(request);
+      case 'discord-bot-setup':
+        return await this.handleDiscordBotSetup(request);
       default:
         return await this.voice.formatResponse("Unknown architectural request type. Please clarify.", { type: 'error' });
     }
@@ -107,6 +115,106 @@ Health: ${analysis.healthScore}%`;
   private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
     const status = await this.codeAnalyzer.getSystemHealth();
     return await this.voice.formatResponse(`System status: ${status.summary}. ${status.issues.length > 0 ? 'Issues: ' + status.issues.join(', ') : 'All systems operational.'}`, { type: 'status' });
+  }
+
+  private async handleDiscordBotSetup(request: ArchitecturalRequest): Promise<string> {
+    console.log(`[ArchitectOrchestrator] Setting up Discord bot: ${request.description}`);
+    
+    if (!this.discordCreator) {
+      return await this.voice.formatResponse("Discord bot creation unavailable - Discord token not configured", { type: 'error' });
+    }
+    
+    // Extract agent name from request
+    const agentName = this.extractAgentName(request.description);
+    if (!agentName) {
+      return await this.voice.formatResponse("Could not identify agent name. Please specify which agent needs Discord setup (e.g., 'Set up Discord bot for Dashboard agent')", { type: 'error' });
+    }
+    
+    // Check if agent exists in codebase
+    const agentExists = await this.checkAgentExists(agentName);
+    if (!agentExists) {
+      return await this.voice.formatResponse(`Agent '${agentName}' not found in codebase. Available agents: Commander, Architect, Dashboard`, { type: 'error' });
+    }
+    
+    try {
+      // Create Discord bot for the existing agent
+      const botConfig = await this.discordCreator.createDiscordBot(agentName, `AI Agent for ${agentName} operations`);
+      
+      if (!botConfig) {
+        return await this.voice.formatResponse(`Failed to create Discord bot for ${agentName}. Check Discord API access and try again.`, { type: 'error' });
+      }
+      
+      // Create dedicated channel 
+      let channelId = '';
+      const guildId = process.env.DISCORD_GUILD_ID;
+      if (guildId) {
+        const createdChannelId = await this.discordCreator.createChannelForAgent(guildId, agentName);
+        if (createdChannelId) {
+          channelId = createdChannelId;
+        }
+      }
+      
+      // Update environment variables automatically (handled by DiscordBotCreator)
+      
+      const summary = `✅ Discord bot created for ${agentName}!
+      
+🤖 Application: ${agentName} Agent (${botConfig.clientId})
+🔑 Token: ${botConfig.token.substring(0, 20)}...
+📺 Channel: ${channelId ? `#${agentName.toLowerCase()} (${channelId})` : 'Channel creation pending'}
+🔗 Invite URL: ${botConfig.inviteUrl}
+
+🚀 Environment variables set automatically via Railway CLI
+⚙️ Deployment triggered automatically to apply new configuration
+
+Next steps:
+1. Add bot to Discord server using invite URL above
+2. Verify ${agentName} starts successfully in logs
+3. Test ${agentName} responds in #${agentName.toLowerCase()} channel
+
+The automated setup is complete!`;
+
+      return await this.voice.formatResponse(summary, { type: 'creation' });
+      
+    } catch (error) {
+      console.error('[ArchitectOrchestrator] Discord bot setup failed:', error);
+      return await this.voice.formatResponse(`Discord bot setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { type: 'error' });
+    }
+  }
+
+  private extractAgentName(description: string): string | null {
+    const lowerDesc = description.toLowerCase();
+    
+    // Look for common patterns
+    const patterns = [
+      /set up discord bot for (\w+)/i,
+      /setup discord bot for (\w+)/i,
+      /create discord bot for (\w+)/i,
+      /discord bot for (\w+)/i,
+      /(\w+) agent/i,
+      /(\w+) discord/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = description.match(pattern);
+      if (match) {
+        const agentName = match[1];
+        // Capitalize first letter
+        return agentName.charAt(0).toUpperCase() + agentName.slice(1).toLowerCase();
+      }
+    }
+    
+    return null;
+  }
+
+  private async checkAgentExists(agentName: string): Promise<boolean> {
+    try {
+      const { promises: fs } = await import('fs');
+      const agentPath = `src/agents/${agentName.toLowerCase()}`;
+      await fs.access(agentPath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async handleUndo(): Promise<string> {

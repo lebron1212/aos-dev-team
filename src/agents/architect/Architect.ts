@@ -26,7 +26,7 @@ export class Architect {
     this.orchestrator = new ArchitectOrchestrator(config);
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
-    this.builder = new AgentBuilder(config.claudeApiKey);
+    this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.watcher = new ArchWatch();

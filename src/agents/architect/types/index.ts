@@ -2,6 +2,7 @@ export interface ArchitectConfig {
   architectToken: string;
   architectChannelId: string;
   claudeApiKey: string;
+  discordToken?: string;
 }
 
 export interface ArchitecturalRequest {
@@ -42,6 +43,8 @@ export interface AgentSpec {
   };
   discordIntegration?: boolean;
   createWatcher?: boolean;
+  voicePersonality?: string;
+  watcherPurpose?: string;
 }
 
 export interface AnalysisResult {

@@ -17,7 +17,7 @@ async function testDiscordBotSetup() {
     architectToken: 'test-token',
     architectChannelId: 'test-channel',
     claudeApiKey: process.env.CLAUDE_API_KEY || 'test-key',
-    discordToken: process.env.DISCORD_TOKEN || 'test-discord-token'
+    userToken: process.env.DISCORD_USER_TOKEN || 'test-user-token'
   };
   
   try {
@@ -51,7 +51,7 @@ async function testDiscordBotSetup() {
     console.log('\n✅ Step 3: Validating response...');
     
     if (response.includes('Discord bot creation unavailable')) {
-      console.log('⚠️  Discord token not configured - automation infrastructure ready but needs tokens');
+      console.log('⚠️  Discord user token not configured - automation infrastructure ready but needs user token');
     } else if (response.includes('Discord bot created')) {
       console.log('🎉 SUCCESS: Full automated Discord bot setup completed!');
     } else if (response.includes('Agent \'Dashboard\' not found')) {
@@ -70,7 +70,7 @@ async function testDiscordBotSetup() {
     console.log('\n🚀 Test Conclusion:');
     console.log('The automated Discord bot setup infrastructure is fully implemented and ready.');
     console.log('Command "Set up Discord bot for Dashboard agent" will trigger full automation when:');
-    console.log('1. DISCORD_TOKEN environment variable is set');
+    console.log('1. DISCORD_USER_TOKEN environment variable is set (user OAuth2 token)');
     console.log('2. DISCORD_GUILD_ID environment variable is set');
     console.log('3. Railway CLI is configured for automatic environment variable setting');
     

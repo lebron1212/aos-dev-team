@@ -44,6 +44,9 @@ export class ArchitectOrchestrator {
         case 'discord-bot-setup':
           result = await this.handleDiscordBotSetup(request);
           break;
+        case 'system-status':
+          result = await this.handleSystemStatus(request);
+          break;
         default:
           result = `Unknown request type: ${request.type}`;
       }
@@ -169,6 +172,26 @@ Setup complete!`;
 
     } catch (error) {
       return `Discord bot setup failed: ${error.message}`;
+    }
+  }
+
+  private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
+    await this.sendProgressUpdate(`🩺 Checking system health...`, 'progress');
+    
+    try {
+      const status = await this.codeAnalyzer.getSystemHealth();
+      
+      return `System Status Report:
+- Status: ${status.status}
+- Health Score: ${status.complexity || 'N/A'}%
+- Files Analyzed: ${status.filesAnalyzed || 0}
+- Issues: ${status.issues?.length || 0}
+- API Cost: ${status.apiCost?.toFixed(4) || '0.0000'}
+- Recommendations: ${status.recommendations?.join(', ') || 'None'}
+
+${status.issues?.length > 0 ? '\n⚠️ Issues Found:\n' + status.issues.join('\n') : '✅ No critical issues detected'}`;
+    } catch (error) {
+      return `System status check failed: ${error.message}`;
     }
   }
 

@@ -8,10 +8,10 @@ export class AgentBuilder {
   private claude: Anthropic;
   private discordCreator?: DiscordBotCreator;
 
-  constructor(claudeApiKey: string, discordToken?: string) {
+  constructor(claudeApiKey: string, userToken?: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
-    if (discordToken) {
-      this.discordCreator = new DiscordBotCreator(claudeApiKey, discordToken);
+    if (userToken) {
+      this.discordCreator = new DiscordBotCreator(claudeApiKey, userToken);
     }
   }
 

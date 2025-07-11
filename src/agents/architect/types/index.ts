@@ -2,7 +2,7 @@ export interface ArchitectConfig {
   architectToken: string;
   architectChannelId: string;
   claudeApiKey: string;
-  discordToken?: string;
+  userToken?: string;
 }
 
 export interface ArchitecturalRequest {

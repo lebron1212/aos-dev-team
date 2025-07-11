@@ -19,13 +19,13 @@ export class ArchitectOrchestrator {
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
-    this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
+    this.builder = new AgentBuilder(config.claudeApiKey, config.userToken);
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.intelligence = new CodeIntelligence(config.claudeApiKey);
     
-    if (config.discordToken) {
-      this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.discordToken);
+    if (config.userToken) {
+      this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.userToken);
     }
   }
 

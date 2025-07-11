@@ -12,11 +12,11 @@ interface DiscordBotConfig {
 
 export class DiscordBotCreator {
   private claude: Anthropic;
-  private discordToken: string; // Main Discord app token for API calls
+  private userToken: string; // User token for creating applications
 
-  constructor(claudeApiKey: string, discordToken: string) {
+  constructor(claudeApiKey: string, userToken: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
-    this.discordToken = discordToken;
+    this.userToken = userToken;
   }
 
   async createDiscordBot(agentName: string, purpose: string): Promise<DiscordBotConfig | null> {
@@ -62,7 +62,7 @@ export class DiscordBotCreator {
       const response = await fetch('https://discord.com/api/v10/applications', {
         method: 'POST',
         headers: {
-          'Authorization': `Bot ${this.discordToken}`,
+          'Authorization': `Bearer ${this.userToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -90,7 +90,7 @@ export class DiscordBotCreator {
       const response = await fetch(`https://discord.com/api/v10/applications/${applicationId}/bot`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bot ${this.discordToken}`,
+          'Authorization': `Bearer ${this.userToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -162,7 +162,7 @@ export class DiscordBotCreator {
       const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bot ${this.discordToken}`,
+          'Authorization': `Bearer ${this.userToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({

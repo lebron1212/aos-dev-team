@@ -7,6 +7,7 @@ import { VoiceSystem } from '../communication/VoiceSystem.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { ComWatch } from '../../watcher/comwatch/ComWatch.js';
+import { FeedbackLearningSystem } from '../intelligence/FeedbackLearningSystem.js';
 import { ContextProvider } from '../intelligence/ContextProvider.js';
 
 export class UniversalRouter {
@@ -20,6 +21,7 @@ export class UniversalRouter {
   // Context storage
   private conversationContext: Map<string, any> = new Map();
  private comWatch: ComWatch;
+ private feedbackSystem: FeedbackLearningSystem;
   
   constructor(config: CommanderConfig) {
     this.intentAnalyzer = new COM_L1_IntentAnalyzer(config.claudeApiKey);
@@ -29,6 +31,7 @@ export class UniversalRouter {
     this.discordInterface = new DiscordInterface(config);
     this.claude = new Anthropic({ apiKey: config.claudeApiKey });
    this.comWatch = new ComWatch();
+   this.feedbackSystem = new FeedbackLearningSystem();
   }
 
   async routeUniversalInput(
@@ -253,13 +256,18 @@ export class UniversalRouter {
     const timeContext = ContextProvider.getTimeContext();
    const systemStatus = ContextProvider.getSystemStatus();
    
+   // Get learned examples from feedback
+   const learningExamples = this.feedbackSystem.generateLearningExamples();
+   
    const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 Recent conversation:
 ${recentConversation}
 
 Current user message: "${intent.parameters.description}"
 
-Respond appropriately to the conversation context and user's message.`;
+Respond appropriately to the conversation context and user's message.
+
+${learningExamples}`;
 
     try {
       const response = await this.claude.messages.create({

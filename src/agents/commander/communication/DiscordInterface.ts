@@ -67,7 +67,9 @@ export class DiscordInterface {
     if (!context) return;
     
     if (feedbackType === 'suggestion') {
-      await this.sendMessage('What should I have said instead? Reply with your suggestion.');
+      setTimeout(async () => {
+        await this.sendMessage('What should I have said instead? Reply with your suggestion.');
+      }, 1000);
     } else {
       await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
     }

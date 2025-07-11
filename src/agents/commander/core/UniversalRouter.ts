@@ -267,7 +267,7 @@ Respond appropriately to the conversation context and user's message.`;
       const content = response.content[0];
       if (content.type === 'text') {
         const response = VoiceSystem.enhanceCTOVoice(content.text);
-       await this.comWatch.logCommanderInteraction(input, response, messageHistory.map(m => `${m.author}: ${m.content}`));
+       await this.comWatch.logCommanderInteraction(intent.parameters.description, response, messageHistory.map(m => `${m.author}: ${m.content}`));
        return response;
       }
     } catch (error) {

@@ -11,7 +11,7 @@ export class ContextProvider {
     else if (hour < 22) timeOfDay = 'evening';
     else timeOfDay = 'night';
     
-    return \`\${day} \${timeOfDay}\`;
+    return `${day} ${timeOfDay}`;
   }
   
   static getSystemStatus(): any {

@@ -47,7 +47,7 @@ export class ComWatch {
       context: context.slice(-3),
       feedback,
       chars: input.length + response.length,
-      wordCount: response.split(/\\s+/).length,
+      wordCount: response.split(/\s+/).length,
       isGood: this.evaluateResponseQuality(response, feedback),
       category: this.categorizeInteraction(input, response, feedback)
     };
@@ -61,7 +61,7 @@ export class ComWatch {
     await this.saveInteractions();
     await this.collector.logInteraction(input, response, context, feedback);
     
-    console.log(\`[ComWatch] Logged \${interaction.category} interaction: \${interaction.wordCount} words, quality: \${interaction.isGood ? 'good' : 'needs improvement'}\`);
+    console.log(`[ComWatch] Logged ${interaction.category} interaction: ${interaction.wordCount} words, quality: ${interaction.isGood ? 'good' : 'needs improvement'}`);
     
     if (feedback) {
       await this.processImmediateFeedback(interaction);
@@ -102,7 +102,7 @@ export class ComWatch {
     
     const avgWords = this.interactions.reduce((sum, i) => sum + i.wordCount, 0) / this.interactions.length;
     if (avgWords > 15) {
-      insights.push(\`Responses averaging \${avgWords.toFixed(1)} words - consider being more concise\`);
+      insights.push(`Responses averaging ${avgWords.toFixed(1)} words - consider being more concise`);
     }
     
     const negativeFeedback = this.interactions.filter(i => i.feedback && !i.isGood);
@@ -114,7 +114,7 @@ export class ComWatch {
     const recentInteractions = this.interactions.filter(i => this.isRecent(i.timestamp));
     const recentQuality = recentInteractions.filter(i => i.isGood).length / recentInteractions.length;
     if (recentQuality < 0.8) {
-      insights.push(\`Recent quality score: \${(recentQuality * 100).toFixed(1)}% - needs improvement\`);
+      insights.push(`Recent quality score: ${(recentQuality * 100).toFixed(1)}% - needs improvement`);
     }
     
     return insights;
@@ -157,7 +157,7 @@ export class ComWatch {
       if (positiveFeedback.test(feedback)) return true;
     }
     
-    const wordCount = response.split(/\\s+/).length;
+    const wordCount = response.split(/\s+/).length;
     const hasAsterisks = response.includes('*');
     const hasClichés = /systems nominal|all systems go|firing on all cylinders/i.test(response);
     
@@ -189,12 +189,12 @@ export class ComWatch {
     
     const tooLongCount = negativeFeedback.filter(i => i.feedback?.includes('long') || i.feedback?.includes('wordy')).length;
     if (tooLongCount > 0) {
-      issues.push(\`\${tooLongCount} instances of responses being too long\`);
+      issues.push(`${tooLongCount} instances of responses being too long`);
     }
     
     const tryHardCount = negativeFeedback.filter(i => i.feedback?.includes('try-hard')).length;
     if (tryHardCount > 0) {
-      issues.push(\`\${tryHardCount} instances of forced/try-hard responses\`);
+      issues.push(`${tryHardCount} instances of forced/try-hard responses`);
     }
     
     return issues;
@@ -209,7 +209,7 @@ export class ComWatch {
     try {
       const data = await fs.readFile(this.interactionsFile, 'utf8');
       this.interactions = JSON.parse(data);
-      console.log(\`[ComWatch] Loaded \${this.interactions.length} previous interactions\`);
+      console.log(`[ComWatch] Loaded ${this.interactions.length} previous interactions`);
     } catch (error) {
       this.interactions = [];
       console.log('[ComWatch] No previous interactions found, starting fresh');

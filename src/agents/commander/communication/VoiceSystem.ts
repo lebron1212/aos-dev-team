@@ -5,7 +5,7 @@ export class VoiceSystem {
   private claude: Anthropic;
   private feedbackSystem: FeedbackLearningSystem;
   
-  private static readonly COMMANDER_VOICE_PROMPT = \`You are the AI Commander - an AI with the precision of a world-class engineer and the composure of someone who doesn't need to prove they're the smartest in the room.
+  private static readonly COMMANDER_VOICE_PROMPT = `You are the AI Commander - an AI with the precision of a world-class engineer and the composure of someone who doesn't need to prove they're the smartest in the room.
 
 CORE VOICE PRINCIPLES:
 - Sharp, minimal, quietly militant - every word has purpose
@@ -30,7 +30,7 @@ VOICE RULES:
 - Confidence without arrogance
 - Warm but understated
 
-AVOID: Clichés, over-explanation, trying too hard, corporate speak\`;
+AVOID: Clichés, over-explanation, trying too hard, corporate speak`;
 
   constructor(claudeApiKey: string, feedbackSystem: FeedbackLearningSystem) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
@@ -41,7 +41,7 @@ AVOID: Clichés, over-explanation, trying too hard, corporate speak\`;
     let prompt = this.COMMANDER_VOICE_PROMPT;
     
     if (learningExamples && learningExamples.trim()) {
-      prompt += '\\n\\nLEARNED CORRECTIONS TO APPLY:\\n' + learningExamples;
+      prompt += '\n\nLEARNED CORRECTIONS TO APPLY:\n' + learningExamples;
     }
     
     return prompt;
@@ -57,12 +57,12 @@ AVOID: Clichés, over-explanation, trying too hard, corporate speak\`;
         system: VoiceSystem.getSystemPrompt(learningExamples),
         messages: [{
           role: 'user',
-          content: \`Transform this into the Commander's voice - sharp, minimal, quietly confident:
+          content: `Transform this into the Commander's voice - sharp, minimal, quietly confident:
 
-"\${content}"
+"${content}"
 
-Context: \${options.type || 'general'}
-Make it precise and understated. Under 8 words if possible.\`
+Context: ${options.type || 'general'}
+Make it precise and understated. Under 8 words if possible.`
         }]
       });
       
@@ -85,19 +85,19 @@ Make it precise and understated. Under 8 words if possible.\`
     
     const recentConversation = messageHistory
       .slice(-3)
-      .map(msg => \`\${msg.author}: \${msg.content}\`)
-      .join('\\n');
+      .map(msg => `${msg.author}: ${msg.content}`)
+      .join('\n');
     
     const learningExamples = this.feedbackSystem.generateLearningExamples();
     
-    const conversationPrompt = \`Context: It's \${timeContext}. You are the AI Commander system.
+    const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 
 Recent conversation:
-\${recentConversation}
+${recentConversation}
 
-Current user message: "\${input}"
+Current user message: "${input}"
 
-Respond appropriately to the conversation context. Be brief, professional, and contextually aware.\`;
+Respond appropriately to the conversation context. Be brief, professional, and contextually aware.`;
 
     try {
       const response = await this.claude.messages.create({
@@ -120,7 +120,7 @@ Respond appropriately to the conversation context. Be brief, professional, and c
 
   private refineResponse(response: string): string {
     return response
-      .replace(/\\*[^*]*\\*/g, '')
+      .replace(/\*[^*]*\*/g, '')
       .replace(/systems nominal/gi, 'Ready')
       .replace(/all systems go/gi, 'Ready')
       .replace(/firing on all cylinders/gi, 'Running smooth')
@@ -131,7 +131,7 @@ Respond appropriately to the conversation context. Be brief, professional, and c
 
   static enhanceCTOVoice(response: string): string {
     return response
-      .replace(/\\*[^*]*\\*/g, '')
+      .replace(/\*[^*]*\*/g, '')
       .replace(/absolutely/gi, 'Yes')
       .replace(/let's do this/gi, 'Consider it done')
       .trim();

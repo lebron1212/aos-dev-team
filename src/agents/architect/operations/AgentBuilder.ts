@@ -985,3 +985,54 @@ export * from './types/index.js';`;
     }
   }
 }
+
+  // Add to AgentBuilder class
+  async generateAgentWithAutoDiscord(spec: AgentSpec, guildId?: string): Promise<any> {
+    console.log(`[AgentBuilder] Building ${spec.name} with auto Discord setup`);
+    
+    // First create the agent normally
+    const buildResult = await this.generateAgent(spec);
+    
+    if (buildResult.ready && spec.discordIntegration) {
+      try {
+        // Auto-create Discord bot
+        const discordCreator = new DiscordBotCreator(
+          process.env.CLAUDE_API_KEY!,
+          process.env.DISCORD_TOKEN! // Main bot token for API calls
+        );
+        
+        const botConfig = await discordCreator.createDiscordBot(spec.name, spec.purpose);
+        
+        if (botConfig && guildId) {
+          // Auto-create channel
+          const channelId = await discordCreator.createChannelForAgent(guildId, spec.name);
+          
+          return {
+            ...buildResult,
+            discordSetup: 'automated',
+            botToken: botConfig.token,
+            channelId,
+            inviteUrl: botConfig.inviteUrl,
+            environmentVars: [], // Already set automatically
+            instructions: `Discord bot created automatically! Invite URL: ${botConfig.inviteUrl}`
+          };
+        }
+        
+        return {
+          ...buildResult,
+          discordSetup: 'partial',
+          instructions: 'Discord bot created, but channel setup needs guild ID'
+        };
+        
+      } catch (error) {
+        console.error('[AgentBuilder] Auto Discord setup failed:', error);
+        return {
+          ...buildResult,
+          discordSetup: 'failed',
+          instructions: 'Agent created but Discord setup failed - use manual setup'
+        };
+      }
+    }
+    
+    return buildResult;
+  }

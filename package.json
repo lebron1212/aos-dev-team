@@ -1,11 +1,13 @@
+# Update your package.json start script
+cat > package.json << 'EOF'
 {
   "name": "ai-development-team",
   "version": "1.0.0",
   "description": "Multi-agent AI development system with Discord interface",
-  "main": "dist/index.js",
+  "main": "src/agents/commander/Commander.ts",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "npx tsx src/agents/commander/Commander.ts",
     "dev": "ts-node src/index.ts",
     "watch": "nodemon --exec ts-node src/index.ts"
   },
@@ -22,3 +24,4 @@
     "typescript": "^5.3.3"
   }
 }
+EOF

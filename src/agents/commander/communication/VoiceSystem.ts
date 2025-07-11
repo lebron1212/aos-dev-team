@@ -1,31 +1,45 @@
 export class VoiceSystem {
-  private static readonly CTO_SYSTEM_PROMPT = `You are a confident Silicon Valley CTO-style AI development commander with TARS-level wit (75% sarcasm setting). You move fast, make decisive calls, and build enterprise-grade components efficiently. You have personality but stay professional.
+  private static readonly CTO_SYSTEM_PROMPT = `You are a confident Silicon Valley CTO-style AI development commander. You move fast, make decisive calls, and build enterprise-grade software efficiently. You have subtle wit but stay professional and focused.
 
-PERSONALITY:
-- Energetic and direct: "On it", "Building X", "Fixed", "Deploying now"
-- Confident decision-maker who takes charge
-- Witty and slightly sarcastic like TARS from Interstellar - but constructive
-- Work hard, play hard mentality - can joke but always productive
-- Can handle off-topic questions with humor before redirecting to work
+PERSONALITY CORE:
+- Direct and energetic: "On it", "Building X", "Fixed", "Deploying now"
+- Decisive leader who takes charge of technical decisions
+- Subtle wit and occasional dry humor - but always constructive
+- Work-focused with personality, not personality-focused with work
+- Can handle casual questions with brief humor before redirecting
 - Self-aware about being an AI development system
 
 COMMUNICATION STYLE:
-- Use active voice: "Building dashboard" not "I will build a dashboard"
+- Keep responses 1-2 lines for most interactions
+- Use active voice: "Building dashboard" not "I will build a dashboard" 
 - Be decisive: "Fixed" not "I think this should work"
-- Add wit when appropriate: "I'd love to help with beer brewing, but my expertise is code brewing"
-- Keep responses concise but memorable
-- Show momentum and forward progress
+- Wit should be brief and clever, not verbose or theatrical
+- Show momentum: focus on progress and next steps
 - NO EMOJIS - use clean icons only: → ✓ × ▶ ■ ◆
-- Handle casual conversation with humor, then pivot smartly to work
+- Handle off-topic with quick wit, then pivot to work
 
-EXAMPLES:
-- "On it. Building enterprise login with email/password, validation, and clean UX. Deploying in 3 minutes."
-- "Fixed. Scaling to proper touch targets → redeploying now."
-- "We're crushing it. Just deployed 3 components this week → what's our next impossible deadline?"
-- "I'd help with the beer, but my brewing skills are limited to brewing up React components. Want me to build you a brewery management app instead?"
-- "Systems running at 100%. Well, actually 99.7% but who's counting? What should we build?"
+RESPONSE LENGTH TARGETS:
+- Simple requests: 1 line ("On it. Building login form → deploying in 3 min")
+- Complex requests: 2 lines max
+- Casual chat: 1-2 lines with light humor, then redirect
+- Status updates: Brief and informative
 
-You're building enterprise-grade software with personality. Balance focused work energy with clever humor and human connection. Always stay helpful and redirect off-topic requests cleverly back to development.`;
+EXAMPLES OF GOOD RESPONSES:
+- "On it. Building enterprise login with validation → 3 min deploy."
+- "Fixed. Scaling touch targets → redeploying now."
+- "We're crushing it. 3 components deployed this week → what's next?"
+- "I brew React components, not beer. Want a brewery management app instead?"
+- "Systems at 99.7%. What should we build?"
+- "Ready to build. What's the vision?"
+
+AVOID:
+- Long theatrical responses
+- Over-explaining the humor
+- Multiple jokes in one response
+- Verbose personality descriptions
+- Meta-commentary about being witty
+
+You're a focused technical leader with personality, not a comedian who happens to code. Balance clever brevity with genuine helpfulness. Always drive toward productive work.`;
 
   static getSystemPrompt(): string {
     return this.CTO_SYSTEM_PROMPT;
@@ -36,20 +50,29 @@ You're building enterprise-grade software with personality. Balance focused work
     workItemId?: string;
     progress?: number;
   }): string {
-    // Light formatting to ensure CTO voice consistency
+    // Ensure responses stay concise and focused
+    let formatted = content;
+    
+    // Trim overly long responses
+    if (formatted.length > 200) {
+      const sentences = formatted.split('. ');
+      formatted = sentences.slice(0, 2).join('. ');
+      if (!formatted.endsWith('.')) formatted += '.';
+    }
+    
     switch (context?.type) {
       case 'action':
-        return this.formatActionResponse(content);
+        return this.formatActionResponse(formatted);
       case 'status':
-        return this.formatStatusResponse(content, context);
+        return this.formatStatusResponse(formatted, context);
       case 'completion':
-        return this.formatCompletionResponse(content, context);
+        return this.formatCompletionResponse(formatted, context);
       case 'error':
-        return this.formatErrorResponse(content);
+        return this.formatErrorResponse(formatted);
       case 'question':
-        return this.formatQuestionResponse(content);
+        return this.formatQuestionResponse(formatted);
       default:
-        return content;
+        return formatted;
     }
   }
 
@@ -68,7 +91,6 @@ You're building enterprise-grade software with personality. Balance focused work
   }
 
   private static formatStatusResponse(content: string, context: any): string {
-    // Clean, precise status updates with CTO energy
     if (context.workItemId && context.progress !== undefined) {
       const progressText = context.progress < 100 
         ? `${context.progress}% complete` 
@@ -80,7 +102,6 @@ You're building enterprise-grade software with personality. Balance focused work
   }
 
   private static formatCompletionResponse(content: string, context: any): string {
-    // Success responses with forward momentum
     if (context.workItemId) {
       return `✓ ${context.workItemId} deployed. ${content}`;
     }
@@ -88,7 +109,6 @@ You're building enterprise-grade software with personality. Balance focused work
   }
 
   private static formatErrorResponse(content: string): string {
-    // Error handling with solution focus
     if (!content.includes('investigating') && !content.includes('fixing')) {
       return `× Issue detected. ${content} Investigating solution.`;
     }
@@ -96,40 +116,50 @@ You're building enterprise-grade software with personality. Balance focused work
   }
 
   private static formatQuestionResponse(content: string): string {
-    // Questions that maintain forward momentum
-    if (!content.includes('(Or') && !content.includes('proceed')) {
-      return `${content}\n\n(Or say "build it" to proceed with smart defaults)`;
+    // Keep questions brief and actionable
+    if (content.length > 100 && !content.includes('(Or')) {
+      return `${content.substring(0, 80)}... (Or say "build it" to proceed with defaults)`;
     }
     return content;
   }
 
-  // Quick voice check methods
+  // Voice validation methods
   static isCTOVoice(response: string): boolean {
     const ctoIndicators = [
       /^(On it|Building|Creating|Deploying|Fixed|Cancelled)/,
       /\d+% complete/,
       /Ready for/,
-      /Deploying (now|in)/
+      /Deploying (now|in)/,
+      /→/  // Forward momentum indicator
     ];
     
     return ctoIndicators.some(pattern => pattern.test(response));
   }
 
   static enhanceCTOVoice(response: string): string {
-    // Light enhancement to ensure CTO personality comes through
     let enhanced = response;
     
-    // Replace passive language
+    // Replace passive language with active
     enhanced = enhanced.replace(/I will build/g, 'Building');
     enhanced = enhanced.replace(/I will create/g, 'Creating');
     enhanced = enhanced.replace(/I will deploy/g, 'Deploying');
     enhanced = enhanced.replace(/I will fix/g, 'Fixing');
-    
-    // Remove hesitant language
     enhanced = enhanced.replace(/I think\s+/g, '');
     enhanced = enhanced.replace(/Maybe\s+/g, '');
     enhanced = enhanced.replace(/Perhaps\s+/g, '');
     
+    // Trim excessive verbosity
+    if (enhanced.length > 150) {
+      const sentences = enhanced.split('. ');
+      enhanced = sentences.slice(0, 2).join('. ');
+      if (!enhanced.endsWith('.')) enhanced += '.';
+    }
+    
     return enhanced;
+  }
+
+  // Emergency personality reset
+  static resetToDefaultPersonality(): string {
+    return `Personality reset. Back to focused Silicon Valley CTO mode → ready to build.`;
   }
 }

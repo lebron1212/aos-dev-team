@@ -3,7 +3,7 @@ import { WorkItem, AgentMessage, DiscordEmbed, CommanderConfig } from '../types/
 import { FeedbackLearningSystem } from '../intelligence/FeedbackLearningSystem.js';
 
 export class DiscordInterface {
-  private client: Client;
+  public client: Client;
   private userChannel: TextChannel | null = null;
   private agentChannel: TextChannel | null = null;
   private config: CommanderConfig;
@@ -87,11 +87,11 @@ export class DiscordInterface {
       if (reaction.message.author?.id !== this.client.user?.id) return;
       
       const emoji = reaction.emoji.name;
-      let feedbackType = null;
+      let feedbackType: string | null = null;
       
-      if (['👍', '✅', '💯'].includes(emoji)) feedbackType = 'positive';
-      if (['👎', '❌'].includes(emoji)) feedbackType = 'negative'; 
-      if (['🔄', '⚡'].includes(emoji)) feedbackType = 'suggestion';
+      if (emoji && ['👍', '✅', '💯'].includes(emoji)) feedbackType = 'positive';
+      if (emoji && ['👎', '❌'].includes(emoji)) feedbackType = 'negative'; 
+      if (emoji && ['🔄', '⚡'].includes(emoji)) feedbackType = 'suggestion';
       
       if (feedbackType) {
         console.log(`[Discord] Feedback: ${emoji} (${feedbackType})`);
@@ -120,7 +120,9 @@ export class DiscordInterface {
     // Keep only last 20 messages to prevent memory leaks
     if (this.messageContext.size > 20) {
       const firstKey = this.messageContext.keys().next().value;
-      this.messageContext.delete(firstKey);
+      if (firstKey) {
+        this.messageContext.delete(firstKey);
+      }
     }
   }
 
@@ -149,7 +151,7 @@ export class DiscordInterface {
   async sendMessageToChannel(channelId: string, content: string): Promise<void> {
     try {
       const channel = this.client.channels.cache.get(channelId);
-      if (channel && channel.isTextBased()) {
+      if (channel && channel.isTextBased() && 'send' in channel) {
         await channel.send(content);
         console.log(`[DiscordInterface] Sent delegation message to channel ${channelId}`);
       } else {
@@ -210,11 +212,19 @@ export class DiscordInterface {
     await this.client.login(this.config.discordToken);
   }
 
+  async stop(): Promise<void> {
+    await this.client.destroy();
+  }
+
   get isReady(): boolean {
     return this.client.isReady();
   }
 
   get userChannelReady(): boolean {
     return !!this.userChannel;
+  }
+
+  get agentChannelReady(): boolean {
+    return !!this.agentChannel;
   }
 }

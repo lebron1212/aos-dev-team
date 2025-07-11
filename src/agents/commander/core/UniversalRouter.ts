@@ -48,7 +48,13 @@ export class UniversalRouter {
     await this.discordInterface.trackMessage(input, "", messageId);
     
     try {
-      const messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
+      // Get conversation context for ALL agent interactions
+      const conversationHistory = await this.discordInterface.getRecentMessages(10);
+      const context = {
+        previousMessages: conversationHistory,
+        userQuestion: input,
+        currentTime: new Date().toISOString()
+      };
       
       // Check for debug commands first
       const debugResponse = await this.handleDebugRequest(input);
@@ -76,10 +82,10 @@ export class UniversalRouter {
       
       console.log(`[UniversalRouter] Handling with Commander: ${delegationDecision.reason || 'No suitable specialist bot'}`);
       
-      const context = this.getConversationContext(userId);
-      context.conversationHistory = messageHistory;
+      const existingContext = this.getConversationContext(userId);
+      existingContext.conversationHistory = conversationHistory;
       
-      const intent = await this.intentAnalyzer.analyzeUniversalIntent(input, context);
+      const intent = await this.intentAnalyzer.analyzeUniversalIntent(input, existingContext);
       
       console.log(`[UniversalRouter] Routed to: ${intent.category}/${intent.subcategory}`);
       
@@ -101,14 +107,14 @@ export class UniversalRouter {
           response = await this.handleQuestionRequest(intent, userId, messageId);
           break;
         case 'conversation':
-          response = await this.handleConversationRequest(intent, userId, messageId, messageHistory);
+          response = await this.handleConversationRequest(intent, userId, messageId, conversationHistory);
           break;
         default:
           response = await this.voiceSystem.formatResponse("Not sure how to handle that request. Could you rephrase it?", { type: 'error' });
       }
       
       await this.discordInterface.updateTrackedMessage(messageId, response);
-      await this.comWatch.logCommanderInteraction(input, response, messageHistory.map(m => `${m.author}: ${m.content}`));
+      await this.comWatch.logCommanderInteraction(input, response, conversationHistory.map(m => `${m.author}: ${m.content}`));
       
       return response;
       
@@ -285,7 +291,7 @@ export class UniversalRouter {
     intent: UniversalIntent, 
     userId: string, 
     messageId: string,
-    messageHistory: Array<{content: string, author: string, timestamp: Date}>
+    conversationHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
     // FIXED: Safely access messageContext from DiscordInterface
@@ -319,7 +325,7 @@ export class UniversalRouter {
    
     return await this.voiceSystem.generateConversationResponse(
       intent.parameters.description,
-      messageHistory,
+      conversationHistory,
       ContextProvider.getTimeContext()
     );
   }

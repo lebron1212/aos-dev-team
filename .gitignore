@@ -3,3 +3,7 @@ package-lock.json
 .DS_Store
 .env
 .env
+
+# Test and demo files
+test-honesty-enforcement.js
+demo-conversation-context.js

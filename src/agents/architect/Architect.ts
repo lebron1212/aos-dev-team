@@ -57,11 +57,19 @@ export class Architect {
     console.log(`[Architect] Processing: "${input}"`);
     
     try {
+      // Get conversation context
+      const conversationHistory = await this.discord.getRecentMessages(10);
+      const context = {
+        previousMessages: conversationHistory,
+        userQuestion: input,
+        currentTime: new Date().toISOString()
+      };
+      
       // Analyze the architectural request
       const request = await this.analyzer.analyzeArchitecturalRequest(input, userId);
       
-      // Route to appropriate handler
-      const response = await this.orchestrator.executeArchitecturalWork(request);
+      // Route to appropriate handler with context
+      const response = await this.orchestrator.executeArchitecturalWork(request, context);
       
       // Log the architectural decision
       await this.watcher.logArchitecturalDecision(

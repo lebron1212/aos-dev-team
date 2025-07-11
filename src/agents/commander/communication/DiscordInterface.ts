@@ -11,6 +11,7 @@ export class DiscordInterface {
   private workItemThreads: Map<string, ThreadChannel> = new Map();
   private feedbackSystem: FeedbackLearningSystem;
   private messageContext: Map<string, {input: string, response: string}> = new Map();
+  private messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
   private waitingForSuggestion: string | null = null;
 
   constructor(config: CommanderConfig) {
@@ -42,6 +43,19 @@ export class DiscordInterface {
 
     this.client.on('messageCreate', async (message) => {
       if (message.author.bot) return;
+      
+      // Track all messages for context
+      this.messageHistory.push({
+        content: message.content,
+        author: message.author.username,
+        timestamp: new Date()
+      });
+      
+      // Keep only recent messages (last 50)
+      if (this.messageHistory.length > 50) {
+        this.messageHistory = this.messageHistory.slice(-50);
+      }
+      
       if (this.waitingForSuggestion && message.channelId === this.config.userChannelId) {
         const context = this.messageContext.get(this.waitingForSuggestion);
         if (context) {
@@ -112,6 +126,10 @@ export class DiscordInterface {
     } else {
       await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
     }
+  }
+
+  async getRecentMessages(count: number = 10): Promise<Array<{content: string, author: string, timestamp: Date}>> {
+    return this.messageHistory.slice(-count);
   }
 
   async trackMessage(input: string, response: string, messageId: string): Promise<void> {

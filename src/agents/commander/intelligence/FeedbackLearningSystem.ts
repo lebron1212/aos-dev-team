@@ -1,6 +1,5 @@
-import fs from 'fs/promises';
-import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+import { createClient } from 'redis';
 
 interface FeedbackExample {
  id: string;
@@ -15,15 +14,31 @@ interface FeedbackExample {
 }
 
 export class FeedbackLearningSystem {
- private feedbackFile = 'data/commander-feedback.json';
  private examples: FeedbackExample[] = [];
  private claude?: Anthropic;
+ private redis?: any;
+ private redisKey = 'commander:feedback';
  
  constructor(claudeApiKey?: string) {
    if (claudeApiKey) {
      this.claude = new Anthropic({ apiKey: claudeApiKey });
    }
+   this.initRedis();
    this.loadFeedback();
+ }
+
+ private async initRedis() {
+   try {
+     if (process.env.REDIS_URL) {
+       this.redis = createClient({ url: process.env.REDIS_URL });
+       await this.redis.connect();
+       console.log('[FeedbackLearning] Connected to Redis');
+     } else {
+       console.log('[FeedbackLearning] No Redis URL, using memory storage');
+     }
+   } catch (error) {
+     console.error('[FeedbackLearning] Redis connection failed:', error);
+   }
  }
 
  async logFeedback(
@@ -68,20 +83,19 @@ export class FeedbackLearningSystem {
    const corrections = recentExamples.map(ex => {
      if (ex.suggestedImprovement) {
        return `AVOID: "${ex.commanderResponse}"\nUSE: "${ex.suggestedImprovement}"`;
-     } else if (ex.userFeedback.includes('DO NOT')) {
-       const avoidPattern = ex.userFeedback.match(/DO NOT ([^.]+)/i)?.[1] || ex.userFeedback;
-       return `NEVER: ${avoidPattern}\nGOOD: "${ex.userInput}" → direct professional response`;
+     } else if (ex.userFeedback.includes('DO NOT') || ex.userFeedback.includes('too try-hard')) {
+       return `NEVER: Use overly wordy or try-hard responses like "${ex.commanderResponse}"\nBETTER: Keep wit brief, smooth, and natural`;
      }
-     return `IMPROVE: Avoid patterns in "${ex.commanderResponse}"`;
+     return `IMPROVE: User said "${ex.userFeedback}" about response "${ex.commanderResponse}"`;
    }).join('\n\n');
    
-   return `\nLEARNED CORRECTIONS:\n${corrections}\n\nAPPLY THESE LESSONS TO AVOID REPEATING MISTAKES.`;
+   return `\nLEARNED CORRECTIONS:\n${corrections}\n\nSTRICTLY APPLY THESE LESSONS. Keep responses brief and natural.`;
  }
 
  async detectFeedback(userMessage: string, lastResponse: string): Promise<boolean> {
    if (!this.claude) {
      console.log('[FeedbackLearning] No Claude API key, using fallback detection');
-     return /feedback|correction|better|instead|don't|avoid|DO NOT/i.test(userMessage);
+     return /feedback|correction|better|instead|don't|avoid|DO NOT|too try-hard|way too|dial.*down/i.test(userMessage);
    }
 
    try {
@@ -101,14 +115,14 @@ Is the user giving feedback/correction about the previous response? Answer only:
      return content.type === 'text' && content.text.trim().toUpperCase().includes('YES');
    } catch (error) {
      console.error('[FeedbackLearning] AI feedback detection failed, using fallback');
-     return /feedback|correction|better|instead|don't|avoid|DO NOT/i.test(userMessage);
+     return /feedback|correction|better|instead|don't|avoid|DO NOT|too try-hard|way too|dial.*down/i.test(userMessage);
    }
  }
 
  async extractSuggestion(userFeedback: string, previousResponse: string): Promise<string | undefined> {
    if (!this.claude) {
      console.log('[FeedbackLearning] No Claude API key, using fallback extraction');
-     const match = userFeedback.match(/could just leave it at ['"]([^'"]+)['"]/i);
+     const match = userFeedback.match(/should.*be.*['"]([^'"]+)['"]/i);
      return match ? match[1].trim() : undefined;
    }
 
@@ -121,13 +135,12 @@ Is the user giving feedback/correction about the previous response? Answer only:
          content: `Previous AI response: "${previousResponse}"
 User feedback: "${userFeedback}"
 
-Extract what the user wants the AI to say instead. If they're giving a specific alternative or correction, return just that text. If no specific alternative is provided, return "GENERAL_FEEDBACK".
+Extract what the user wants the AI to say instead. If they're giving a specific alternative, return just that text. If no specific alternative is provided, return "GENERAL_FEEDBACK".
 
 Examples:
-- "could just leave it at 'Morning. Ready to build...'" → "Morning. Ready to build..."  
-- "don't smirk" → "GENERAL_FEEDBACK"
-- "say 'On it' instead" → "On it"
-- "be more direct" → "GENERAL_FEEDBACK"`
+- "should be a one or two liner" → "GENERAL_FEEDBACK"
+- "just say 'Morning. Ready to build.'" → "Morning. Ready to build."
+- "too try-hard" → "GENERAL_FEEDBACK"`
        }]
      });
      
@@ -140,14 +153,14 @@ Examples:
      console.error('[FeedbackLearning] AI suggestion extraction failed');
    }
    
-   const match = userFeedback.match(/could just leave it at ['"]([^'"]+)['"]/i);
+   const match = userFeedback.match(/should.*be.*['"]([^'"]+)['"]/i);
    return match ? match[1].trim() : undefined;
  }
 
  private async classifyFeedback(feedback: string, context?: string): Promise<'positive' | 'negative' | 'suggestion'> {
    if (!this.claude) {
-     if (/DO NOT|don't|bad|wrong|terrible/i.test(feedback)) return 'negative';
-     if (/try|instead|better|should|more like|could just/i.test(feedback)) return 'suggestion';
+     if (/DO NOT|don't|bad|wrong|terrible|too try-hard|way too|dial.*down/i.test(feedback)) return 'negative';
+     if (/try|instead|better|should|more like|one or two liner/i.test(feedback)) return 'suggestion';
      if (/good|great|perfect|nice|love|excellent/i.test(feedback)) return 'positive';
      return 'negative';
    }
@@ -181,16 +194,16 @@ Answer only: POSITIVE, NEGATIVE, or SUGGESTION`
      console.error('[FeedbackLearning] AI classification failed, using fallback');
    }
    
-   if (/DO NOT|don't|bad|wrong|terrible/i.test(feedback)) return 'negative';
-   if (/try|instead|better|should|more like|could just/i.test(feedback)) return 'suggestion';
+   if (/DO NOT|don't|bad|wrong|terrible|too try-hard|way too|dial.*down/i.test(feedback)) return 'negative';
+   if (/try|instead|better|should|more like|one or two liner/i.test(feedback)) return 'suggestion';
    if (/good|great|perfect|nice|love|excellent/i.test(feedback)) return 'positive';
    return 'negative';
  }
 
  private classifyCategory(input: string, response: string): 'work' | 'casual' | 'wit' | 'personality' {
    const workKeywords = /build|deploy|create|fix|component|api|system/i;
-   const witKeywords = /humor|wit|funny|joke|sarcasm|smirk/i;
-   const personalityKeywords = /personality|charm|tone|voice|style|smirk|nominal/i;
+   const witKeywords = /humor|wit|funny|joke|sarcasm|try-hard|witty/i;
+   const personalityKeywords = /personality|charm|tone|voice|style|communication/i;
    
    if (workKeywords.test(input + response)) return 'work';
    if (witKeywords.test(input + response)) return 'wit';
@@ -200,19 +213,27 @@ Answer only: POSITIVE, NEGATIVE, or SUGGESTION`
 
  private async loadFeedback(): Promise<void> {
    try {
-     const data = await fs.readFile(this.feedbackFile, 'utf8');
-     this.examples = JSON.parse(data);
+     if (this.redis) {
+       const data = await this.redis.get(this.redisKey);
+       if (data) {
+         this.examples = JSON.parse(data);
+         console.log(`[FeedbackLearning] Loaded ${this.examples.length} feedback examples from Redis`);
+       }
+     }
    } catch (error) {
+     console.error('[FeedbackLearning] Failed to load from Redis:', error);
      this.examples = [];
    }
  }
 
  private async saveFeedback(): Promise<void> {
    try {
-     await fs.mkdir(path.dirname(this.feedbackFile), { recursive: true });
-     await fs.writeFile(this.feedbackFile, JSON.stringify(this.examples, null, 2));
+     if (this.redis) {
+       await this.redis.set(this.redisKey, JSON.stringify(this.examples));
+       console.log(`[FeedbackLearning] Saved ${this.examples.length} feedback examples to Redis`);
+     }
    } catch (error) {
-     console.error('[FeedbackLearning] Failed to save feedback:', error);
+     console.error('[FeedbackLearning] Failed to save to Redis:', error);
    }
  }
 }

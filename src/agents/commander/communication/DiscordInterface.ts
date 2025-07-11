@@ -72,6 +72,8 @@ export class DiscordInterface {
       }, 1000);
     } else {
       await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
+      // Also log to ComWatch as training data
+      // TODO: Access ComWatch instance
     }
   }
 

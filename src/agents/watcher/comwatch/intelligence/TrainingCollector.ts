@@ -4,7 +4,7 @@ export class TrainingCollector {
  private dataFile = 'data/comwatch-training.jsonl';
  private examples: any[] = [];
 
- async logInteraction(input: string, response: string, context: string[]): Promise<void> {
+ async logInteraction(input: string, response: string, context: string[], feedback?: string): Promise<void> {
    const example = {
      timeOfDay: new Date().getHours(),
      dayOfWeek: new Date().getDay(),
@@ -12,6 +12,8 @@ export class TrainingCollector {
      input,
      response,
      context: context.slice(-3),
+      feedback,
+      isGood: !feedback || feedback === 'positive',
      tokens: input.length + response.length
    };
    

@@ -273,7 +273,7 @@ export class UniversalRouter {
    
     // Get learned examples from feedback - THIS IS THE KEY FIX
     const learningExamples = this.feedbackSystem.generateLearningExamples();
-   
+    console.log("[UniversalRouter] Learning examples:", JSON.stringify(learningExamples));   
     const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 Recent conversation:
 ${recentConversation}

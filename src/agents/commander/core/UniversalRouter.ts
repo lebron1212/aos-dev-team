@@ -281,3 +281,83 @@ export class UniversalRouter {
     return description.substring(0, 47) + '...';
   }
 }
+
+  // Add debug methods for checking feedback and learning
+  private async handleDebugRequest(input: string): Promise<string> {
+    const lowerInput = input.toLowerCase();
+    
+    if (lowerInput.includes('what have you learned') || lowerInput.includes('show feedback')) {
+      return await this.showLearnedFeedback();
+    }
+    
+    if (lowerInput.includes('comwatch stats') || lowerInput.includes('learning stats')) {
+      return await this.showComWatchStats();
+    }
+    
+    if (lowerInput.includes('recent interactions')) {
+      return await this.showRecentInteractions();
+    }
+    
+    return null; // Not a debug command
+  }
+
+  private async showLearnedFeedback(): Promise<string> {
+    const learningExamples = this.feedbackSystem.generateLearningExamples();
+    const feedbackCount = await this.getFeedbackCount();
+    
+    if (!learningExamples || learningExamples.trim() === '') {
+      return await this.voiceSystem.formatResponse("No corrections logged yet. Clean slate.", { type: 'info' });
+    }
+    
+    const summary = `Feedback logged: ${feedbackCount} entries\n\nRecent corrections:\n${learningExamples.substring(0, 300)}${learningExamples.length > 300 ? '...' : ''}`;
+    
+    return await this.voiceSystem.formatResponse(summary, { type: 'info' });
+  }
+
+  private async showComWatchStats(): Promise<string> {
+    try {
+      const stats = await this.comWatch.getTrainingStats();
+      const insights = await this.comWatch.generateLearningInsights();
+      
+      const summary = `ComWatch Status: ${stats.watchingStatus}
+Total interactions: ${stats.totalInteractions}
+Average words per response: ${stats.averageWordCount?.toFixed(1) || 'N/A'}
+Recent quality ratio: ${stats.recentQualityRatio?.toFixed(2) || 'N/A'}
+
+Categories: ${Object.entries(stats.categories || {}).map(([k,v]) => `${k}:${v}`).join(', ')}
+
+${insights.length > 0 ? 'Insights:\n' + insights.join('\n') : 'No insights yet.'}`;
+
+      return await this.voiceSystem.formatResponse(summary, { type: 'info' });
+    } catch (error) {
+      return await this.voiceSystem.formatResponse("ComWatch data unavailable. Still learning.", { type: 'error' });
+    }
+  }
+
+  private async showRecentInteractions(): Promise<string> {
+    try {
+      const trainingData = await this.comWatch.exportTrainingData();
+      const recent = trainingData.slice(-5);
+      
+      if (recent.length === 0) {
+        return await this.voiceSystem.formatResponse("No interactions logged yet.", { type: 'info' });
+      }
+      
+      const summary = recent.map((interaction, i) => 
+        `${i+1}. ${interaction.category} (${interaction.wordCount}w) - Quality: ${interaction.quality}${interaction.feedback ? ' [FEEDBACK]' : ''}`
+      ).join('\n');
+      
+      return await this.voiceSystem.formatResponse(`Recent interactions:\n${summary}`, { type: 'info' });
+    } catch (error) {
+      return await this.voiceSystem.formatResponse("Interaction data unavailable.", { type: 'error' });
+    }
+  }
+
+  private async getFeedbackCount(): Promise<number> {
+    try {
+      // Access the feedback system's stored examples
+      return (this.feedbackSystem as any).examples?.length || 0;
+    } catch (error) {
+      return 0;
+    }
+  }

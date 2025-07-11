@@ -237,3 +237,15 @@ Answer only: POSITIVE, NEGATIVE, or SUGGESTION`
    }
  }
 }
+
+ getFeedbackCount(): number {
+   return this.examples.length;
+ }
+
+ getRecentFeedback(count: number = 5): FeedbackExample[] {
+   return this.examples.slice(-count);
+ }
+
+ getFeedbackByCategory(category: string): FeedbackExample[] {
+   return this.examples.filter(ex => ex.category === category);
+ }

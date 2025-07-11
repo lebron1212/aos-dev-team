@@ -11,6 +11,7 @@ export class DiscordInterface {
   private workItemThreads: Map<string, ThreadChannel> = new Map();
   private feedbackSystem: FeedbackLearningSystem;
   private messageContext: Map<string, {input: string, response: string}> = new Map();
+  private waitingForSuggestion: string | null = null;
 
   constructor(config: CommanderConfig) {
     this.config = config;
@@ -38,6 +39,24 @@ export class DiscordInterface {
         status: 'online'
       });
     });
+    this.client.on('messageCreate', async (message) => {
+      if (message.author.bot) return;
+      if (this.waitingForSuggestion && message.channelId === this.config.userChannelId) {
+        const context = this.messageContext.get(this.waitingForSuggestion);
+        if (context) {
+          await this.feedbackSystem.logFeedback(
+            context.input, 
+            context.response, 
+            'suggestion', 
+            'User suggestion', 
+            message.content
+          );
+          await this.sendMessage('Got it. I\'ll learn from that suggestion.');
+          this.waitingForSuggestion = null;
+        }
+      }
+    });
+
     this.client.on('error', (error) => {
       console.error('[DiscordInterface] Client error:', error);
     });
@@ -67,9 +86,11 @@ export class DiscordInterface {
     if (!context) return;
     
     if (feedbackType === 'suggestion') {
+      this.waitingForSuggestion = messageId;
       setTimeout(async () => {
         await this.sendMessage('What should I have said instead? Reply with your suggestion.');
       }, 1000);
+    }, 1000);
     } else {
       await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
       // Also log to ComWatch as training data

@@ -251,9 +251,7 @@ ${recentConversation}
 
 Current user message: "${intent.parameters.description}"
 
-Respond as the confident Silicon Valley CTO with TARS-level wit. Read the conversation context and respond appropriately to the relationship dynamics and subtext, not just the literal words. Be conversational, direct, and charming.
-
-${intent.subcategory === 'conversation-offtopic' ? 'This seems off-topic from development - handle with humor and redirect cleverly.' : ''}`;
+Respond appropriately to the conversation context and user's message.`;
 
     try {
       const response = await this.claude.messages.create({

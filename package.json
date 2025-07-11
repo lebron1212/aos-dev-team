@@ -1,27 +1,17 @@
-# Update your package.json start script
-cat > package.json << 'EOF'
 {
-  "name": "ai-development-team",
-  "version": "1.0.0",
-  "description": "Multi-agent AI development system with Discord interface",
-  "main": "src/agents/commander/Commander.ts",
+  "name": "ai-commander",
+  "version": "2.0.0",
+  "description": "AI Commander for Aurora OS Development",
+  "main": "src/index.ts",
+  "type": "module",
   "scripts": {
-    "build": "tsc",
-    "start": "npx tsx src/agents/commander/Commander.ts",
-    "dev": "ts-node src/index.ts",
-    "watch": "nodemon --exec ts-node src/index.ts"
+    "start": "npx tsx src/index.ts",
+    "dev": "npx tsx src/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.17.2",
     "@octokit/rest": "^20.1.2",
-    "axios": "^1.6.2",
     "discord.js": "^14.21.0",
     "dotenv": "^16.3.1"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.4",
-    "ts-node": "^10.9.1",
-    "typescript": "^5.3.3"
   }
 }
-EOF

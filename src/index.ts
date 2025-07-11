@@ -1,10 +1,14 @@
-// New Commander Entry Point
+// AI Commander System - Clean Entry Point
 import { Commander } from './agents/commander/Commander.js';
 
-console.log('Starting AI Commander System...');
+async function main() {
+  console.log('🚀 Starting AI Commander System...');
+  
+  const commander = new Commander();
+  await commander.start();
+}
 
-const commander = new Commander();
-commander.start().catch((error) => {
-  console.error('Commander startup failed:', error);
+main().catch((error) => {
+  console.error('❌ Commander failed to start:', error);
   process.exit(1);
 });

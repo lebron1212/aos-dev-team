@@ -1,37 +1,24 @@
 import { ArchitectDiscord } from './communication/ArchitectDiscord.js';
 import { UniversalAnalyzer } from './core/UniversalAnalyzer.js';
 import { ArchitectOrchestrator } from './core/ArchitectOrchestrator.js';
-import { CodeAnalyzer } from './intelligence/CodeAnalyzer.js';
-import { CodeModifier } from './operations/CodeModifier.js';
-import { AgentBuilder } from './operations/AgentBuilder.js';
-import { SystemRefiner } from './operations/SystemRefiner.js';
-import { ArchitectVoice } from './communication/ArchitectVoice.js';
 import { ArchWatch } from '../watcher/archwatch/ArchWatch.js';
-import { ArchitectConfig, ArchitecturalRequest } from './types/index.js';
+import { ArchitectConfig } from './types/index.js';
 
 export class Architect {
   private discord: ArchitectDiscord;
   private analyzer: UniversalAnalyzer;
   private orchestrator: ArchitectOrchestrator;
-  private codeAnalyzer: CodeAnalyzer;
-  private modifier: CodeModifier;
-  private builder: AgentBuilder;
-  private refiner: SystemRefiner;
-  private voice: ArchitectVoice;
   private watcher: ArchWatch;
 
   constructor(config: ArchitectConfig) {
     this.discord = new ArchitectDiscord(config);
     this.analyzer = new UniversalAnalyzer(config.claudeApiKey);
-    this.orchestrator = new ArchitectOrchestrator(config);
-    this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
-    this.modifier = new CodeModifier(config.claudeApiKey);
-    this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
-    this.refiner = new SystemRefiner(config.claudeApiKey);
-    this.voice = new ArchitectVoice(config.claudeApiKey);
     this.watcher = new ArchWatch();
     
-    console.log('[Architect] Internal systems architect initialized');
+    // Pass discord interface to orchestrator for progress updates
+    this.orchestrator = new ArchitectOrchestrator(config, this.discord);
+    
+    console.log('[Architect] Simplified architect initialized');
   }
 
   async start(): Promise<void> {
@@ -41,11 +28,18 @@ export class Architect {
         message.author.id, 
         message.id
       );
-      await this.discord.sendMessage(response);
+      
+      // Only send final response if it's not already sent via progress updates
+      if (!response.includes('**Started**') && !response.includes('**Completed**')) {
+        await this.discord.sendMessage(response);
+      }
     });
 
     await this.discord.start();
-    console.log('[Architect] 🏗️ Internal Architect online - ready to build');
+    
+    // Send startup notification
+    await this.discord.sendMessage('🏗️ **Architect Online** - Ready for build requests');
+    console.log('[Architect] 🏗️ Architect online - simplified mode');
   }
 
   private async processArchitecturalRequest(
@@ -57,13 +51,20 @@ export class Architect {
     console.log(`[Architect] Processing: "${input}"`);
     
     try {
-      // Analyze the architectural request
-      const request = await this.analyzer.analyzeArchitecturalRequest(input, userId);
+      // Quick undo handling
+      if (input.toLowerCase().includes('undo last')) {
+        const result = await this.orchestrator.undoLastModification();
+        return result.success ? `✅ ${result.message}` : `❌ ${result.message}`;
+      }
       
-      // Route to appropriate handler
+      // Analyze the request
+      const request = await this.analyzer.analyzeArchitecturalRequest(input, userId);
+      console.log(`[Architect] Classified as: ${request.type}`);
+      
+      // Execute the work (progress updates sent automatically)
       const response = await this.orchestrator.executeArchitecturalWork(request);
       
-      // Log the architectural decision
+      // Log the decision
       await this.watcher.logArchitecturalDecision(
         request.type,
         input,
@@ -75,7 +76,9 @@ export class Architect {
       
     } catch (error) {
       console.error('[Architect] Error:', error);
-      return await this.voice.formatResponse("System modification failed. Reviewing approach.", { type: 'error' });
+      const errorMsg = `❌ **System Error**: ${error.message}`;
+      await this.discord.sendMessage(errorMsg);
+      return errorMsg;
     }
   }
 }

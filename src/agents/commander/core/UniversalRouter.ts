@@ -6,6 +6,7 @@ import { DiscordInterface } from '../communication/DiscordInterface.js';
 import { VoiceSystem } from '../communication/VoiceSystem.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { ComWatch } from '../../watcher/comwatch/ComWatch.js';
 
 export class UniversalRouter {
   private intentAnalyzer: COM_L1_IntentAnalyzer;
@@ -17,6 +18,7 @@ export class UniversalRouter {
   
   // Context storage
   private conversationContext: Map<string, any> = new Map();
+ private comWatch: ComWatch;
   
   constructor(config: CommanderConfig) {
     this.intentAnalyzer = new COM_L1_IntentAnalyzer(config.claudeApiKey);
@@ -25,6 +27,7 @@ export class UniversalRouter {
     this.workManager = new WorkManager();
     this.discordInterface = new DiscordInterface(config);
     this.claude = new Anthropic({ apiKey: config.claudeApiKey });
+   this.comWatch = new ComWatch();
   }
 
   async routeUniversalInput(
@@ -263,7 +266,9 @@ Respond appropriately to the conversation context and user's message.`;
       
       const content = response.content[0];
       if (content.type === 'text') {
-        return VoiceSystem.enhanceCTOVoice(content.text);
+        const response = VoiceSystem.enhanceCTOVoice(content.text);
+       await this.comWatch.logCommanderInteraction(input, response, messageHistory.map(m => `${m.author}: ${m.content}`));
+       return response;
       }
     } catch (error) {
       console.error('[UniversalRouter] Conversation handling failed:', error);

@@ -122,23 +122,32 @@ Return ONLY this JSON structure with no other text:
       watcherPurpose: `Learning optimization patterns for ${name}`
     };
   }
-        } catch (parseError) {
-          console.error('[AgentBuilder] Failed to parse agent spec:', parseError);
-        }
-      }
-    } catch (error) {
-      console.error('[AgentBuilder] Agent spec parsing failed:', error);
-    }
-
-    return this.fallbackAgentSpec(request);
-  }
 
   async generateAgent(spec: AgentSpec): Promise<any> {
     console.log(`[AgentBuilder] Building complete agent: ${spec.name} with watcher`);
     
+    // Validate spec first
+    const validation = this.validateAgentSpec(spec);
+    if (!validation.valid) {
+      return {
+        summary: `Agent validation failed: ${validation.errors.join(', ')}`,
+        ready: false,
+        error: validation.errors[0]
+      };
+    }
+
     const agentPath = `src/agents/${spec.name.toLowerCase()}`;
     const watcherPath = `src/agents/watcher/${spec.name.toLowerCase()}watch`;
     const createdFiles: string[] = [];
+    
+    // Check if agent already exists
+    if (await this.directoryExists(agentPath)) {
+      return {
+        summary: `Agent ${spec.name} already exists`,
+        ready: false,
+        error: 'Agent directory already exists'
+      };
+    }
     
     try {
       // 1. Create directory structures
@@ -147,36 +156,34 @@ Return ONLY this JSON structure with no other text:
         await this.createWatcherDirectories(watcherPath);
       }
       
-      // 2. Generate core agent files
+      // 2. Generate files sequentially to avoid conflicts
       const coreFiles = await this.generateCoreFiles(spec, agentPath);
       createdFiles.push(...coreFiles);
       
-      // 3. Generate intelligence files
       const intelligenceFiles = await this.generateIntelligenceFiles(spec, agentPath);
       createdFiles.push(...intelligenceFiles);
       
-      // 4. Generate communication files
       const commFiles = await this.generateCommunicationFiles(spec, agentPath);
       createdFiles.push(...commFiles);
       
-      // 5. Generate types
+      // 3. Generate types
       const typesFile = await this.generateTypesFile(spec, agentPath);
       createdFiles.push(typesFile);
       
-      // 6. Generate index file
+      // 4. Generate index file
       const indexFile = await this.generateIndexFile(spec, agentPath);
       createdFiles.push(indexFile);
       
-      // 7. Generate watcher if requested
+      // 5. Generate watcher if requested
       if (spec.createWatcher) {
         const watcherFiles = await this.generateWatcherFiles(spec, watcherPath);
         createdFiles.push(...watcherFiles);
       }
       
-      // 8. Update main index.ts to include new agent
-      await this.updateMainIndex(spec);
+      // 6. Update main index.ts to include new agent
+      await this.updateMainIndexSafely(spec);
       
-      // 9. Create Discord bot if integration is enabled
+      // 7. Create Discord bot if integration is enabled
       let discordBotCreated = false;
       let botToken = '';
       let channelId = '';
@@ -184,35 +191,37 @@ Return ONLY this JSON structure with no other text:
       
       if (spec.discordIntegration && this.discordCreator) {
         console.log(`[AgentBuilder] Creating Discord bot for ${spec.name}...`);
-        const botConfig = await this.discordCreator.createDiscordBot(spec.name, spec.purpose);
-        
-        if (botConfig) {
-          discordBotCreated = true;
-          botToken = botConfig.token;
-          inviteUrl = botConfig.inviteUrl;
+        try {
+          const botConfig = await this.discordCreator.createDiscordBot(spec.name, spec.purpose);
           
-          // Create dedicated channel (assuming a default guild ID, this could be configured)
-          const guildId = process.env.DISCORD_GUILD_ID;
-          if (guildId) {
-            const createdChannelId = await this.discordCreator.createChannelForAgent(guildId, spec.name);
-            if (createdChannelId) {
-              channelId = createdChannelId;
+          if (botConfig) {
+            discordBotCreated = true;
+            botToken = botConfig.token;
+            inviteUrl = botConfig.inviteUrl;
+            
+            // Create dedicated channel (assuming a default guild ID, this could be configured)
+            const guildId = process.env.DISCORD_GUILD_ID;
+            if (guildId) {
+              const createdChannelId = await this.discordCreator.createChannelForAgent(guildId, spec.name);
+              if (createdChannelId) {
+                channelId = createdChannelId;
+              }
             }
+            
+            console.log(`[AgentBuilder] Discord bot created successfully for ${spec.name}`);
           }
-          
-          console.log(`[AgentBuilder] Discord bot created successfully for ${spec.name}`);
-        } else {
-          console.warn(`[AgentBuilder] Failed to create Discord bot for ${spec.name}, continuing without Discord integration`);
+        } catch (error) {
+          console.warn(`[AgentBuilder] Failed to create Discord bot for ${spec.name}:`, error);
         }
       }
       
-      // 10. Register with Commander
+      // 8. Register with Commander
       if (spec.discordIntegration) {
         await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
       }
       
-      // 11. Commit the new agent
-      await this.commitNewAgent(spec, createdFiles);
+      // 9. Commit the new agent safely
+      await this.commitNewAgentSafely(spec, createdFiles);
       
       return {
         summary: `Agent ${spec.name} created with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,
@@ -240,6 +249,37 @@ Return ONLY this JSON structure with no other text:
         ready: false,
         error: errorMessage
       };
+    }
+  }
+
+  private validateAgentSpec(spec: AgentSpec): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    
+    if (!spec.name || spec.name.length < 2) {
+      errors.push('Agent name must be at least 2 characters');
+    }
+    
+    if (!/^[A-Z][a-zA-Z]*$/.test(spec.name)) {
+      errors.push('Agent name must be PascalCase');
+    }
+    
+    if (!spec.purpose || spec.purpose.length < 10) {
+      errors.push('Agent purpose must be descriptive');
+    }
+    
+    if (!spec.capabilities || spec.capabilities.length === 0) {
+      errors.push('Agent must have at least one capability');
+    }
+    
+    return { valid: errors.length === 0, errors };
+  }
+
+  private async directoryExists(path: string): Promise<boolean> {
+    try {
+      const stat = await fs.stat(path);
+      return stat.isDirectory();
+    } catch {
+      return false;
     }
   }
 
@@ -898,32 +938,51 @@ export * from './types/index.js';`;
     return indexFile;
   }
 
-  private async updateMainIndex(spec: AgentSpec): Promise<void> {
+  private async updateMainIndexSafely(spec: AgentSpec): Promise<void> {
+    const indexPath = 'src/index.ts';
+    
     try {
-      const indexPath = 'src/index.ts';
-      const currentContent = await fs.readFile(indexPath, 'utf8');
+      const content = await fs.readFile(indexPath, 'utf8');
       
-      const importLine = `import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';`;
-      const watcherImportLine = spec.createWatcher ? 
-        `import { ${spec.name}Watch } from './agents/watcher/${spec.name.toLowerCase()}watch/${spec.name}Watch.js';` : '';
-      
-      if (currentContent.includes(importLine)) {
-        console.log(`[AgentBuilder] ${spec.name} already integrated in index.ts`);
+      // Check if already integrated
+      if (content.includes(`import { ${spec.name} }`)) {
+        console.log(`[AgentBuilder] ${spec.name} already integrated`);
         return;
       }
       
-      const lines = currentContent.split('\n');
-      const lastImportIndex = lines.map((line, index) => line.startsWith('import') ? index : -1)
-        .filter(index => index !== -1)
-        .pop() ?? -1;
+      // Use simple string modification for safety
+      const updatedContent = this.addAgentToIndex(content, spec);
+      await fs.writeFile(indexPath, updatedContent);
       
-      lines.splice(lastImportIndex + 1, 0, importLine);
-      if (watcherImportLine) {
-        lines.splice(lastImportIndex + 2, 0, watcherImportLine);
-      }
+      console.log(`[AgentBuilder] Updated index.ts to include ${spec.name}${spec.createWatcher ? ' and watcher' : ''}`);
       
-      const startFunctionName = `start${spec.name}`;
-      const startFunction = `
+    } catch (error) {
+      console.error(`[AgentBuilder] Failed to update index.ts:`, error);
+      // Continue without index update rather than failing
+    }
+  }
+
+  private addAgentToIndex(content: string, spec: AgentSpec): string {
+    const lines = content.split('\n');
+    
+    const importLine = `import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';`;
+    const watcherImportLine = spec.createWatcher ? 
+      `import { ${spec.name}Watch } from './agents/watcher/${spec.name.toLowerCase()}watch/${spec.name}Watch.js';` : '';
+    
+    // Find last import
+    const lastImportIndex = lines.map((line, index) => line.startsWith('import') ? index : -1)
+      .filter(index => index !== -1)
+      .pop() ?? -1;
+    
+    // Add imports
+    lines.splice(lastImportIndex + 1, 0, importLine);
+    if (watcherImportLine) {
+      lines.splice(lastImportIndex + 2, 0, watcherImportLine);
+    }
+    
+    // Add start function
+    const startFunctionName = `start${spec.name}`;
+    const startFunction = `
 async function ${startFunctionName}() {
   const ${spec.name.toLowerCase()}Config = {
     ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: process.env.${spec.name.toUpperCase()}_DISCORD_TOKEN!,\n    ${spec.name.toLowerCase()}ChannelId: process.env.${spec.name.toUpperCase()}_CHANNEL_ID!,\n    ` : ''}claudeApiKey: process.env.CLAUDE_API_KEY!
@@ -936,42 +995,32 @@ async function ${startFunctionName}() {
     console.log('[${spec.name}] Environment variables not set, skipping startup');
   }
 }`;
+    
+    // Add before Promise.all or at end
+    const promiseAllIndex = lines.findIndex(line => line.includes('Promise.all'));
+    if (promiseAllIndex !== -1) {
+      lines.splice(promiseAllIndex, 0, startFunction);
       
-      const promiseAllIndex = lines.findIndex(line => line.includes('Promise.all'));
-      if (promiseAllIndex !== -1) {
-        lines.splice(promiseAllIndex, 0, startFunction);
-        
-        const promiseAllLine = lines[promiseAllIndex + startFunction.split('\n').length];
-        if (promiseAllLine.includes('startCommander()')) {
-          lines[promiseAllIndex + startFunction.split('\n').length] = promiseAllLine.replace(
-            '])',
-            `,\n  ${startFunctionName}()\n])`
-          );
-        }
-      } else {
-        lines.push(startFunction);
-        lines.push(`\n${startFunctionName}().catch(console.error);`);
+      // Update Promise.all
+      const promiseAllLineIndex = promiseAllIndex + startFunction.split('\n').length;
+      const promiseAllLine = lines[promiseAllLineIndex];
+      if (promiseAllLine && promiseAllLine.includes('])')) {
+        lines[promiseAllLineIndex] = promiseAllLine.replace(
+          '])',
+          `,\n    ${startFunctionName}()\n  ])`
+        );
       }
-      
-      await fs.writeFile(indexPath, lines.join('\n'));
-      console.log(`[AgentBuilder] Updated index.ts to include ${spec.name}${spec.createWatcher ? ' and watcher' : ''}`);
-      
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to update index.ts:`, error);
+    } else {
+      lines.push(startFunction);
+      lines.push(`\n${startFunctionName}().catch(console.error);`);
     }
+    
+    return lines.join('\n');
   }
 
   private async registerBotWithCommander(spec: AgentSpec, channelId: string): Promise<void> {
     try {
       console.log(`[AgentBuilder] Registering ${spec.name} with Commander's BotOrchestrator`);
-      
-      const registrationData = {
-        name: spec.name,
-        purpose: spec.purpose,
-        capabilities: spec.capabilities,
-        channelId: channelId,
-        registeredAt: new Date().toISOString()
-      };
       
       await fs.mkdir('data', { recursive: true });
       
@@ -1002,36 +1051,31 @@ async function ${startFunctionName}() {
     }
   }
 
-  private async commitNewAgent(spec: AgentSpec, files: string[]): Promise<void> {
+  private async commitNewAgentSafely(spec: AgentSpec, files: string[]): Promise<void> {
     try {
-      execSync('git add .', { stdio: 'pipe' });
-      execSync(`git commit -m "🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}"`, { stdio: 'pipe' });
-      execSync('git push origin main', { stdio: 'pipe' });
-      console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
+      const gitAdd = await this.safeGitOperation('git add .');
+      if (!gitAdd) return;
+      
+      const commitMessage = `🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}`;
+      const gitCommit = await this.safeGitOperation(`git commit -m "${commitMessage}"`);
+      if (!gitCommit) return;
+      
+      const gitPush = await this.safeGitOperation('git push origin main');
+      if (gitPush) {
+        console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
+      }
     } catch (error) {
       console.error(`[AgentBuilder] Failed to commit ${spec.name}:`, error);
     }
   }
 
-  private fallbackAgentSpec(request: string): AgentSpec {
-    const name = request.includes('monitor') ? 'Monitor' : 
-                request.includes('deploy') ? 'Deployer' :
-                request.includes('quality') ? 'QualityChecker' : 'CustomAgent';
-    
-    return {
-      name,
-      purpose: `Agent for ${request}`,
-      capabilities: ['basic-processing'],
-      dependencies: ['@anthropic-ai/sdk'],
-      structure: {
-        core: [`${name}.ts`],
-        intelligence: [`${name}Intelligence.ts`],
-        communication: [`${name}Voice.ts`]
-      },
-      discordIntegration: true,
-      voicePersonality: 'Professional and helpful',
-      createWatcher: true,
-      watcherPurpose: `Learning optimization patterns for ${name}`
-    };
+  private async safeGitOperation(operation: string): Promise<boolean> {
+    try {
+      execSync(operation, { stdio: 'pipe' });
+      return true;
+    } catch (error) {
+      console.error(`[AgentBuilder] Git operation failed: ${operation}`, error);
+      return false;
+    }
   }
 }

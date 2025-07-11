@@ -63,28 +63,40 @@ export class UniversalRouter {
       console.log(`[UniversalRouter] Routed to: ${intent.category}/${intent.subcategory}`);
       
       // Step 3: Route to appropriate handler
+      let response: string;
       switch (intent.category) {
         case 'build':
-          return await this.handleBuildRequest(intent, userId, messageId);
+          response = await this.handleBuildRequest(intent, userId, messageId);
+          break;
           
         case 'modify':
-          return await this.handleModifyRequest(intent, userId, messageId);
+          response = await this.handleModifyRequest(intent, userId, messageId);
+          break;
           
         case 'analyze':
-          return await this.handleAnalyzeRequest(intent, userId, messageId);
+          response = await this.handleAnalyzeRequest(intent, userId, messageId);
+          break;
           
         case 'manage':
-          return await this.handleManageRequest(intent, userId, messageId);
+          response = await this.handleManageRequest(intent, userId, messageId);
+          break;
           
         case 'question':
-          return await this.handleQuestionRequest(intent, userId, messageId);
+          response = await this.handleQuestionRequest(intent, userId, messageId);
+          break;
           
         case 'conversation':
-          return await this.handleConversationRequest(intent, userId, messageId, messageHistory);
+          response = await this.handleConversationRequest(intent, userId, messageId, messageHistory);
+          break;
           
         default:
-          return `Not sure how to handle that request. Could you rephrase it?`;
+          response = `Not sure how to handle that request. Could you rephrase it?`;
       }
+      
+      // Step 4: Track message for ComWatch and feedback system
+      await this.discordInterface.trackMessage(input, response, messageId);
+      
+      return response;
       
     } catch (error) {
       console.error('[UniversalRouter] Error:', error);
@@ -254,34 +266,34 @@ export class UniversalRouter {
       .join('\n');
     
     const timeContext = ContextProvider.getTimeContext();
-   const systemStatus = ContextProvider.getSystemStatus();
+    const systemStatus = ContextProvider.getSystemStatus();
    
-   // Get learned examples from feedback
-   const learningExamples = this.feedbackSystem.generateLearningExamples();
+    // Get learned examples from feedback - THIS IS THE KEY FIX
+    const learningExamples = this.feedbackSystem.generateLearningExamples();
    
-   const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
+    const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 Recent conversation:
 ${recentConversation}
 
 Current user message: "${intent.parameters.description}"
 
-Respond appropriately to the conversation context and user's message.
+${learningExamples}
 
-${learningExamples}`;
+Respond appropriately to the conversation context and user's message. Apply all learned corrections to avoid repeating past mistakes.`;
 
     try {
       const response = await this.claude.messages.create({
         model: 'claude-3-opus-20240229',
         max_tokens: 300,
-        system: VoiceSystem.getSystemPrompt(), // Use our actual system prompt!
+        system: VoiceSystem.getSystemPrompt() + learningExamples, // INJECT LEARNING HERE TOO
         messages: [{ role: 'user', content: conversationPrompt }]
       });
       
       const content = response.content[0];
       if (content.type === 'text') {
-        const response = VoiceSystem.enhanceCTOVoice(content.text);
-       await this.comWatch.logCommanderInteraction(intent.parameters.description, response, messageHistory.map(m => `${m.author}: ${m.content}`));
-       return response;
+        const finalResponse = VoiceSystem.enhanceCTOVoice(content.text);
+        await this.comWatch.logCommanderInteraction(intent.parameters.description, finalResponse, messageHistory.map(m => `${m.author}: ${m.content}`));
+        return finalResponse;
       }
     } catch (error) {
       console.error('[UniversalRouter] Conversation handling failed:', error);

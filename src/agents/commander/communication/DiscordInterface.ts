@@ -45,15 +45,33 @@ export class DiscordInterface {
      if (this.waitingForSuggestion && message.channelId === this.config.userChannelId) {
        const context = this.messageContext.get(this.waitingForSuggestion);
        if (context) {
+         const suggestion = await this.feedbackSystem.extractSuggestion(message.content, context.response);
          await this.feedbackSystem.logFeedback(
            context.input, 
            context.response, 
            'suggestion', 
-           'User suggestion', 
-           message.content
+           'User correction via Discord', 
+           suggestion
          );
-         await this.sendMessage('Got it. I\'ll learn from that suggestion.');
+         await this.sendMessage('Understood. Learning from that correction.');
          this.waitingForSuggestion = null;
+       }
+     }
+     
+     // Auto-detect feedback patterns using AI
+     const lastMessage = Array.from(this.messageContext.values()).pop();
+     if (lastMessage) {
+       const isFeedback = await this.feedbackSystem.detectFeedback(message.content, lastMessage.response);
+       if (isFeedback) {
+         const suggestion = await this.feedbackSystem.extractSuggestion(message.content, lastMessage.response);
+         await this.feedbackSystem.logFeedback(
+           lastMessage.input,
+           lastMessage.response,
+           message.content,
+           'Auto-detected AI feedback',
+           suggestion
+         );
+         console.log('[DiscordInterface] AI detected and logged feedback');
        }
      }
    });
@@ -98,6 +116,11 @@ export class DiscordInterface {
 
  async trackMessage(input: string, response: string, messageId: string): Promise<void> {
    this.messageContext.set(messageId, { input, response });
+   // Keep only last 20 messages to prevent memory leaks
+   if (this.messageContext.size > 20) {
+     const firstKey = this.messageContext.keys().next().value;
+     this.messageContext.delete(firstKey);
+   }
  }
 
  async setupVMTIntegration(): Promise<void> {
@@ -111,6 +134,35 @@ export class DiscordInterface {
    } catch (error) {
      console.error('[DiscordInterface] Failed to send message:', error);
      return null;
+   }
+ }
+
+ async sendAgentMessage(message: AgentMessage): Promise<void> {
+   if (!this.agentChannel) return;
+   try {
+     await this.agentChannel.send(`🤖 ${message.from} → ${message.to}\n${message.content}`);
+   } catch (error) {
+     console.error('[DiscordInterface] Failed to send agent message:', error);
+   }
+ }
+
+ async createWorkItemThread(workItem: WorkItem): Promise<ThreadChannel> {
+   if (!this.userChannel) throw new Error('User channel not available');
+   
+   const thread = await this.userChannel.threads.create({
+     name: `${workItem.id}: ${workItem.title}`,
+     autoArchiveDuration: 1440,
+     reason: `Work item thread for ${workItem.id}`
+   });
+   
+   this.workItemThreads.set(workItem.id, thread);
+   return thread;
+ }
+
+ async updateWorkItemThread(workItem: WorkItem, message: string): Promise<void> {
+   const thread = this.workItemThreads.get(workItem.id);
+   if (thread) {
+     await thread.send(`📊 Progress: ${workItem.progress}% - ${message}`);
    }
  }
 

@@ -21,13 +21,21 @@ export class FeedbackLearningSystem {
    this.loadFeedback();
  }
 
+ // NEW: Handle both old and new method signatures
  async logFeedback(
-   userInput: string,
-   commanderResponse: string,
-   userFeedback: string,
-   context: string,
-   suggestedImprovement?: string
+   userInputOrParam1: string,
+   commanderResponseOrParam2: string,
+   feedbackTypeOrParam3: string,
+   contextOrParam4?: string,
+   suggestedImprovementOrParam5?: string
  ): Promise<void> {
+   
+   // Handle the Discord interface call: (input, response, type, context, suggestion)
+   const userInput = userInputOrParam1;
+   const commanderResponse = commanderResponseOrParam2;
+   const feedbackType = feedbackTypeOrParam3;
+   const context = contextOrParam4 || 'Discord interaction';
+   const suggestedImprovement = suggestedImprovementOrParam5;
    
    const feedback: FeedbackExample = {
      id: `fb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -35,9 +43,9 @@ export class FeedbackLearningSystem {
      context,
      userInput,
      commanderResponse,
-     userFeedback,
+     userFeedback: feedbackType,
      suggestedImprovement,
-     feedbackType: this.classifyFeedback(userFeedback),
+     feedbackType: await this.classifyFeedback(feedbackType, context),
      category: this.classifyCategory(userInput, commanderResponse)
    };
 
@@ -49,41 +57,88 @@ export class FeedbackLearningSystem {
 
  generateLearningExamples(): string {
    const recentExamples = this.examples
-     .filter(ex => ex.feedbackType === 'positive' || ex.suggestedImprovement)
-     .slice(-15);
+     .filter(ex => ex.feedbackType === 'negative' || ex.suggestedImprovement)
+     .slice(-10);
    
    if (recentExamples.length === 0) return '';
    
-   const exampleStr = recentExamples.map(ex => {
+   const corrections = recentExamples.map(ex => {
      if (ex.suggestedImprovement) {
-       return `User: "${ex.userInput}"\nBetter: "${ex.suggestedImprovement}"`;
-     } else {
-       return `User: "${ex.userInput}"\nGood: "${ex.commanderResponse}"`;
+       return `AVOID: "${ex.commanderResponse}"\nUSE: "${ex.suggestedImprovement}"`;
+     } else if (ex.userFeedback.includes('DO NOT')) {
+       const avoidPattern = ex.userFeedback.match(/DO NOT ([^.]+)/i)?.[1] || ex.userFeedback;
+       return `NEVER: ${avoidPattern}\nGOOD: "${ex.userInput}" → direct professional response`;
      }
+     return `IMPROVE: Avoid patterns in "${ex.commanderResponse}"`;
    }).join('\n\n');
    
-   return `\nLEARNED EXAMPLES:\n${exampleStr}`;
+   return `\nLEARNED CORRECTIONS:\n${corrections}\n\nAPPLY THESE LESSONS TO AVOID REPEATING MISTAKES.`;
  }
 
- detectFeedback(userMessage: string, lastResponse: string): boolean {
-   const feedbackPatterns = [
-     /that was (bad|terrible|wrong|perfect|great|good)/i,
-     /try this instead/i,
-     /better would be/i,
-     /should have said/i,
-     /more like/i,
-     /you lost \d+%/i,
-     /took it back/i,
-     /dial it back/i,
-     /too much/i,
-     /not enough/i
-   ];
+ async detectFeedback(userMessage: string, lastResponse: string): Promise<boolean> {
+   // Use AI to detect if this is feedback about the previous response
+   try {
+     const claude = new (await import('@anthropic-ai/sdk')).default({ 
+       apiKey: process.env.CLAUDE_API_KEY 
+     });
+     
+     const response = await claude.messages.create({
+       model: 'claude-3-haiku-20240307',
+       max_tokens: 50,
+       messages: [{
+         role: 'user',
+         content: `Previous AI response: "${lastResponse}"
+User's next message: "${userMessage}"
+
+Is the user giving feedback/correction about the previous response? Answer only: YES or NO`
+       }]
+     });
+     
+     const content = response.content[0];
+     return content.type === 'text' && content.text.trim().toUpperCase().includes('YES');
+   } catch (error) {
+     console.error('[FeedbackLearning] AI feedback detection failed, using fallback');
+     // Fallback to simple patterns only if AI fails
+     return /feedback|correction|better|instead|don't|avoid/i.test(userMessage);
+   }
+ }
+
+ async extractSuggestion(userFeedback: string, previousResponse: string): Promise<string | undefined> {
+   try {
+     const claude = new (await import('@anthropic-ai/sdk')).default({ 
+       apiKey: process.env.CLAUDE_API_KEY 
+     });
+     
+     const response = await claude.messages.create({
+       model: 'claude-3-haiku-20240307',
+       max_tokens: 200,
+       messages: [{
+         role: 'user',
+         content: `Previous AI response: "${previousResponse}"
+User feedback: "${userFeedback}"
+
+Extract what the user wants the AI to say instead. If they're giving a specific alternative or correction, return just that text. If no specific alternative is provided, return "GENERAL_FEEDBACK".
+
+Examples:
+- "could just leave it at 'Morning. Ready to build...'" → "Morning. Ready to build..."  
+- "don't smirk" → "GENERAL_FEEDBACK"
+- "say 'On it' instead" → "On it"
+- "be more direct" → "GENERAL_FEEDBACK"`
+       }]
+     });
+     
+     const content = response.content[0];
+     if (content.type === 'text') {
+       const extracted = content.text.trim();
+       return extracted === 'GENERAL_FEEDBACK' ? undefined : extracted;
+     }
+   } catch (error) {
+     console.error('[FeedbackLearning] AI suggestion extraction failed');
+   }
    
-   return feedbackPatterns.some(pattern => pattern.test(userMessage));
- }
-
- extractSuggestion(userFeedback: string): string | undefined {
+   // Fallback to simple regex only if AI fails
    const suggestionPatterns = [
+     /could just leave it at ['"]([^'"]+)['"]/i,
      /try this instead:?\s*["']?([^"']+)["']?/i,
      /better would be:?\s*["']?([^"']+)["']?/i,
      /should have said:?\s*["']?([^"']+)["']?/i,
@@ -98,10 +153,46 @@ export class FeedbackLearningSystem {
    return undefined;
  }
 
- private classifyFeedback(feedback: string): 'positive' | 'negative' | 'suggestion' {
-   const positive = /good|great|perfect|nice|love|excellent/i.test(feedback);
-   const suggestion = /try|instead|better|should|more like/i.test(feedback);
+ private async classifyFeedback(feedback: string, context?: string): Promise<'positive' | 'negative' | 'suggestion'> {
+   try {
+     const claude = new (await import('@anthropic-ai/sdk')).default({ 
+       apiKey: process.env.CLAUDE_API_KEY 
+     });
+     
+     const response = await claude.messages.create({
+       model: 'claude-3-haiku-20240307',
+       max_tokens: 50,
+       messages: [{
+         role: 'user',
+         content: `User feedback: "${feedback}"
+${context ? `Context: ${context}` : ''}
+
+Classify this feedback as one of:
+- POSITIVE: User likes/approves of the response
+- NEGATIVE: User dislikes/disapproves of the response  
+- SUGGESTION: User is offering specific improvement/correction
+
+Answer only: POSITIVE, NEGATIVE, or SUGGESTION`
+       }]
+     });
+     
+     const content = response.content[0];
+     if (content.type === 'text') {
+       const classification = content.text.trim().toUpperCase();
+       if (classification.includes('POSITIVE')) return 'positive';
+       if (classification.includes('SUGGESTION')) return 'suggestion';
+       return 'negative';
+     }
+   } catch (error) {
+     console.error('[FeedbackLearning] AI classification failed, using fallback');
+   }
    
+   // Simple fallback if AI fails
+   const positive = /good|great|perfect|nice|love|excellent/i.test(feedback);
+   const negative = /DO NOT|don't|bad|wrong|terrible/i.test(feedback);
+   const suggestion = /try|instead|better|should|more like|could just/i.test(feedback);
+   
+   if (negative) return 'negative';
    if (suggestion) return 'suggestion';
    if (positive) return 'positive';
    return 'negative';
@@ -109,8 +200,8 @@ export class FeedbackLearningSystem {
 
  private classifyCategory(input: string, response: string): 'work' | 'casual' | 'wit' | 'personality' {
    const workKeywords = /build|deploy|create|fix|component|api|system/i;
-   const witKeywords = /humor|wit|funny|joke|sarcasm/i;
-   const personalityKeywords = /personality|charm|tone|voice|style/i;
+   const witKeywords = /humor|wit|funny|joke|sarcasm|smirk/i;
+   const personalityKeywords = /personality|charm|tone|voice|style|smirk|nominal/i;
    
    if (workKeywords.test(input + response)) return 'work';
    if (witKeywords.test(input + response)) return 'wit';

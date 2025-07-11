@@ -1,7 +1,7 @@
 export interface ArchitecturalDecision {
   id: string;
   timestamp: string;
-  type: 'code-analysis' | 'system-modification' | 'agent-creation' | 'behavior-refinement' | 'system-status';
+  type: 'code-analysis' | 'system-modification' | 'agent-creation' | 'behavior-refinement' | 'system-status' | 'discord-bot-setup';
   request: string;
   result: DecisionResult;
   impact: 'low' | 'medium' | 'high';

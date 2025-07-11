@@ -6,7 +6,7 @@ export interface ArchitectConfig {
 }
 
 export interface ArchitecturalRequest {
-  type: 'code-analysis' | 'system-modification' | 'agent-creation' | 'behavior-refinement' | 'system-status';
+  type: 'code-analysis' | 'system-modification' | 'agent-creation' | 'behavior-refinement' | 'system-status' | 'discord-bot-setup';
   description: string;
   target?: string;
   priority: 'low' | 'medium' | 'high';

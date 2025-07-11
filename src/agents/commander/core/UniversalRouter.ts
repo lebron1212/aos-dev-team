@@ -41,6 +41,9 @@ export class UniversalRouter {
   ): Promise<string> {
     
     console.log(`[UniversalRouter] Processing: "${input}" from user ${userId}`);
+
+      // CRITICAL: Track input immediately so feedback detection works
+      await this.discordInterface.trackMessage(input, "", messageId);
     
     try {
       // Step 1: Get conversation history for context (temporary fallback)
@@ -94,7 +97,7 @@ export class UniversalRouter {
       }
       
       // Step 4: Track message for ComWatch and feedback system
-      await this.discordInterface.trackMessage(input, response, messageId);
+      await this.discordInterface.updateTrackedMessage(messageId, response);
       
       return response;
       

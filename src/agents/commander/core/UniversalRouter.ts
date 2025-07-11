@@ -36,13 +36,18 @@ export class UniversalRouter {
     console.log(`[UniversalRouter] Processing: "${input}" from user ${userId}`);
     
     try {
-      // Step 1: Analyze intent with context
+      // Step 1: Get conversation history for context
+      const messageHistory = await this.discordInterface.getRecentMessages(5);
+      
+      // Step 2: Analyze intent with conversation context
       const context = this.getConversationContext(userId);
+      context.conversationHistory = messageHistory;
+      
       const intent = await this.intentAnalyzer.analyzeUniversalIntent(input, context);
       
       console.log(`[UniversalRouter] Routed to: ${intent.category}/${intent.subcategory}`);
       
-      // Step 2: Route to appropriate handler
+      // Step 3: Route to appropriate handler
       switch (intent.category) {
         case 'build':
           return await this.handleBuildRequest(intent, userId, messageId);
@@ -60,7 +65,7 @@ export class UniversalRouter {
           return await this.handleQuestionRequest(intent, userId, messageId);
           
         case 'conversation':
-          return await this.handleConversationRequest(intent, userId, messageId);
+          return await this.handleConversationRequest(intent, userId, messageId, messageHistory);
           
         default:
           return `Not sure how to handle that request. Could you rephrase it?`;
@@ -223,15 +228,22 @@ export class UniversalRouter {
   private async handleConversationRequest(
     intent: UniversalIntent, 
     userId: string, 
-    messageId: string
+    messageId: string,
+    messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
-    // Let Claude handle conversation naturally with the TARS personality
-    const conversationPrompt = `The user said: "${intent.parameters.description}"
+    // Build conversation context for Claude
+    const recentConversation = messageHistory
+      .slice(-5) // Last 5 messages
+      .map(msg => `${msg.author}: ${msg.content}`)
+      .join('\n');
+    
+    const conversationPrompt = `Recent conversation:
+${recentConversation}
 
-This is casual conversation. Respond as the witty Silicon Valley CTO with TARS-level personality (75% sarcasm). 
+Current user message: "${intent.parameters.description}"
 
-Context: You're an AI development commander. Stay in character, be witty and helpful, and naturally steer off-topic requests back to building/development when appropriate. Don't be robotic - be conversational and dynamic.
+Respond as the confident Silicon Valley CTO with TARS-level wit. Read the conversation context and respond appropriately to the relationship dynamics and subtext, not just the literal words. Be conversational, direct, and charming.
 
 ${intent.subcategory === 'conversation-offtopic' ? 'This seems off-topic from development - handle with humor and redirect cleverly.' : ''}`;
 

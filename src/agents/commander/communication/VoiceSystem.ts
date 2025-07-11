@@ -152,6 +152,12 @@ You're a CTO who happens to have personality, not a personality trying to be a C
 
   // Emergency personality reset
   static resetToDefaultPersonality(): string {
-    return `Personality reset. Back to focused Silicon Valley CTO mode → ready to build.`;
+    return `Personality reset complete. Direct CTO mode active. Ready to build.`;
+  }
+
+  // Force system prompt refresh
+  static getSystemPrompt(): string {
+    console.log('[VoiceSystem] Loading CTO system prompt');
+    return this.CTO_SYSTEM_PROMPT;
   }
 }

@@ -273,6 +273,22 @@ export class UniversalRouter {
    
     // Get learned examples from feedback - THIS IS THE KEY FIX
     const learningExamples = this.feedbackSystem.generateLearningExamples();
+
+    // Check if this is feedback about a previous response
+    if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
+      const lastMessage = Array.from(this.messageContext.values()).pop();
+      if (lastMessage) {
+        const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, lastMessage.response);
+        await this.feedbackSystem.logFeedback(
+          lastMessage.input,
+          lastMessage.response,
+          intent.parameters.description,
+          "Classified as feedback",
+          suggestion
+        );
+        console.log("[UniversalRouter] Logged feedback from conversation handler");
+      }
+    }
     console.log("[UniversalRouter] Learning examples:", JSON.stringify(learningExamples));   
     const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
 Recent conversation:

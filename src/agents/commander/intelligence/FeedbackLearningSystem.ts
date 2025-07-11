@@ -14,11 +14,14 @@ interface FeedbackExample {
 }
 
 export class FeedbackLearningSystem {
+ private claude: any;
  private feedbackFile = 'data/commander-feedback.json';
  private examples: FeedbackExample[] = [];
  
- constructor() {
-   this.loadFeedback();
+ constructor(claudeApiKey?: string) {
+   if (claudeApiKey) {
+     this.claude = new (require('@anthropic-ai/sdk')).default({ apiKey: claudeApiKey });
+   }   this.loadFeedback();
  }
 
  // NEW: Handle both old and new method signatures

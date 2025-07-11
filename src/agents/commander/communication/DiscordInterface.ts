@@ -26,7 +26,7 @@ export class DiscordInterface {
    });
    this.setupEventHandlers();
    this.setupFeedbackReactions();
-   this.feedbackSystem = new FeedbackLearningSystem();
+   this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
  }
 
  private setupEventHandlers(): void {

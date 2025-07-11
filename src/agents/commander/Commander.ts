@@ -64,7 +64,9 @@ export class Commander {
       console.log(`[Commander] Processing message from ${message.author.tag}: "${message.content}"`);
       
       // Show typing indicator
-      await message.channel.sendTyping();
+      if ('sendTyping' in message.channel) {
+        await message.channel.sendTyping();
+      }
       
       // Route the message through the universal router
       const response = await this.universalRouter.routeUniversalInput(

@@ -5,6 +5,9 @@ import { BotOrchestrator } from './BotOrchestrator.js';
 import { WorkManager } from '../workflow/WorkManager.js';
 import { DiscordInterface } from '../communication/DiscordInterface.js';
 import { VoiceSystem } from '../communication/VoiceSystem.js';
+import { ConversationEngine } from '../conversation/ConversationEngine.js';
+import { SystemContext } from '../context/SystemContext.js';
+import { DynamicRequestHandler } from '../execution/DynamicRequestHandler.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { ComWatch } from '../../watcher/comwatch/ComWatch.js';
@@ -23,6 +26,9 @@ export class UniversalRouter {
   private comWatch: ComWatch;
   private feedbackSystem: FeedbackLearningSystem;
   private voiceSystem: VoiceSystem;
+  private conversationEngine: ConversationEngine;
+  private systemContext: SystemContext;
+  private dynamicRequestHandler: DynamicRequestHandler;
   
   constructor(config: CommanderConfig) {
     this.intentAnalyzer = new COM_L1_IntentAnalyzer(config.claudeApiKey);
@@ -35,6 +41,11 @@ export class UniversalRouter {
     this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
     this.voiceSystem = new VoiceSystem(config.claudeApiKey, this.feedbackSystem);
     this.botOrchestrator = new BotOrchestrator(config.claudeApiKey, this.discordInterface);
+    
+    // Initialize new conversation system
+    this.systemContext = new SystemContext(config);
+    this.conversationEngine = new ConversationEngine(config.claudeApiKey, this.systemContext);
+    this.dynamicRequestHandler = new DynamicRequestHandler(config.claudeApiKey);
   }
 
   async routeUniversalInput(
@@ -288,40 +299,74 @@ export class UniversalRouter {
     messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
-    // FIXED: Safely access messageContext from DiscordInterface
-    const messageContext = (this.discordInterface as any).messageContext;
-    
-    if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
-      // FIXED: Safe access with null check
-      const lastMessage = messageContext && messageContext.size > 0 ? 
-        Array.from(messageContext.values()).pop() : null;
-        
-      if (lastMessage) {
-        const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, lastMessage.response);
-        await this.feedbackSystem.logFeedback(
-          lastMessage.input,
-          lastMessage.response,
-          intent.parameters.description,
-          "Classified as feedback",
-          suggestion
-        );
-        console.log("[UniversalRouter] Logged feedback from conversation handler");
-        
-        await this.comWatch.logCommanderInteraction(lastMessage.input, lastMessage.response, [], intent.parameters.description);
-        
-        return await this.voiceSystem.generateFeedbackResponse(
-          intent.parameters.description,
-          lastMessage.response,
-          suggestion
-        );
+    // Use new conversation engine for dynamic responses
+    try {
+      const currentTime = new Date();
+      
+      // Check if this is feedback first (maintain existing feedback logic)
+      const messageContext = (this.discordInterface as any).messageContext;
+      
+      if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
+        // Handle feedback with existing system
+        const lastMessage = messageContext && messageContext.size > 0 ? 
+          Array.from(messageContext.values()).pop() : null;
+          
+        if (lastMessage && typeof lastMessage === 'object' && lastMessage !== null && 'response' in lastMessage && 'input' in lastMessage) {
+          const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, (lastMessage as any).response);
+          await this.feedbackSystem.logFeedback(
+            (lastMessage as any).input,
+            (lastMessage as any).response,
+            intent.parameters.description,
+            "Classified as feedback",
+            suggestion
+          );
+          console.log("[UniversalRouter] Logged feedback from conversation handler");
+          
+          await this.comWatch.logCommanderInteraction((lastMessage as any).input, (lastMessage as any).response, [], intent.parameters.description);
+          
+          return await this.voiceSystem.generateFeedbackResponse(
+            intent.parameters.description,
+            (lastMessage as any).response,
+            suggestion
+          );
+        }
       }
+      
+      // Use ConversationEngine for all other conversation requests
+      console.log('[UniversalRouter] Using ConversationEngine for dynamic response');
+      const conversationResponse = await this.conversationEngine.processMessage(
+        intent.parameters.description,
+        userId,
+        currentTime
+      );
+      
+      // If there are actions to execute, handle them
+      if (conversationResponse.actions && conversationResponse.actions.length > 0) {
+        console.log(`[UniversalRouter] Executing ${conversationResponse.actions.length} actions`);
+        const actionResults = await this.executeConversationActions(conversationResponse.actions, conversationResponse.intent);
+        
+        // Format response with action results
+        return this.formatResponseWithActions(conversationResponse.content, actionResults);
+      }
+      
+      // Log the interaction
+      await this.comWatch.logCommanderInteraction(
+        intent.parameters.description, 
+        conversationResponse.content, 
+        messageHistory.map(m => `${m.author}: ${m.content}`)
+      );
+      
+      return conversationResponse.content;
+      
+    } catch (error) {
+      console.error('[UniversalRouter] Error in conversation handling:', error);
+      // Fallback to old system
+      return await this.voiceSystem.generateConversationResponse(
+        intent.parameters.description,
+        messageHistory,
+        ContextProvider.getTimeContext()
+      );
     }
-   
-    return await this.voiceSystem.generateConversationResponse(
-      intent.parameters.description,
-      messageHistory,
-      ContextProvider.getTimeContext()
-    );
   }
 
   private async handleDebugRequest(input: string): Promise<string | null> {
@@ -418,5 +463,41 @@ ${insights.length > 0 ? 'Insights:\n' + insights.join('\n') : 'No insights yet.'
     const description = intent.parameters.description;
     if (description.length <= 50) return description;
     return description.substring(0, 47) + '...';
+  }
+
+  private async executeConversationActions(actions: any[], intent: any): Promise<any[]> {
+    const results: any[] = [];
+
+    for (const action of actions) {
+      try {
+        const result = await this.dynamicRequestHandler.handleRequest(intent, this.getConversationContext('default'));
+        results.push(result);
+      } catch (error) {
+        results.push({
+          success: false,
+          message: `Failed to execute ${action.type}: ${(error as Error).message}`,
+          actionTaken: 'error'
+        });
+      }
+    }
+
+    return results;
+  }
+
+  private formatResponseWithActions(conversationContent: string, actionResults: any[]): string {
+    let response = conversationContent;
+
+    for (const result of actionResults) {
+      if (result.success) {
+        response += `\n\n${result.message}`;
+      } else {
+        response += `\n\n❌ ${result.message}`;
+        if (result.suggestedAlternatives) {
+          response += `\n\nAlternatives:\n${result.suggestedAlternatives.map((alt: string) => `• ${alt}`).join('\n')}`;
+        }
+      }
+    }
+
+    return response;
   }
 }

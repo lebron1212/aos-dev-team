@@ -31,7 +31,10 @@ export class UniversalRouter {
     this.discordInterface = new DiscordInterface(config);
     this.claude = new Anthropic({ apiKey: config.claudeApiKey });
    this.comWatch = new ComWatch();
-   this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
+    // Share message context with DiscordInterface
+    if (this.discordInterface.getMessageContext) {
+      this.messageContext = this.discordInterface.getMessageContext();
+    }   this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
   }
 
   async routeUniversalInput(

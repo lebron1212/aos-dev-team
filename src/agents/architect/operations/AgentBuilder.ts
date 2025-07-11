@@ -18,61 +18,110 @@ export class AgentBuilder {
   async parseAgentRequirements(request: string): Promise<AgentSpec> {
     console.log(`[AgentBuilder] Parsing requirements: ${request}`);
     
+    // Extract agent name from request
+    const agentName = this.extractAgentNameFromRequest(request);
+    
     try {
       const response = await this.claude.messages.create({
         model: 'claude-3-opus-20240229',
         max_tokens: 1000,
         messages: [{
           role: 'user',
-          content: `Parse this agent creation request and extract specifications:
+          content: `Parse this agent creation request and extract specifications. ONLY return valid JSON:
 
 REQUEST: ${request}
 
-Analyze what kind of agent is needed and respond in JSON format:
+Return ONLY this JSON structure with no other text:
 {
-  "name": "AgentClassName",
-  "purpose": "What this agent does",
+  "name": "${agentName}",
+  "purpose": "extracted purpose description",
   "capabilities": ["capability1", "capability2"],
   "dependencies": ["@anthropic-ai/sdk", "discord.js"],
   "structure": {
-    "core": ["AgentName.ts", "AgentOrchestrator.ts"],
-    "intelligence": ["AgentIntelligence.ts"],
-    "communication": ["AgentVoice.ts", "AgentDiscord.ts"]
+    "core": ["${agentName}.ts", "${agentName}Orchestrator.ts"],
+    "intelligence": ["${agentName}Intelligence.ts"],
+    "communication": ["${agentName}Voice.ts", "${agentName}Discord.ts"]
   },
   "discordIntegration": true,
-  "voicePersonality": "Brief description of agent personality",
+  "voicePersonality": "Professional and helpful",
   "createWatcher": true,
-  "watcherPurpose": "What patterns this watcher should learn"
-}
-
-Examples:
-- "performance monitoring agent" → PerformanceMonitor + PerformanceWatch
-- "deployment manager" → DeploymentManager + DeploymentWatch
-- "code quality checker" → QualityChecker + QualityWatch
-
-Always include a watcher for learning and eventual local model replacement.`
+  "watcherPurpose": "Learning patterns for ${agentName} optimization"
+}`
         }]
       });
 
       const content = response.content[0];
       if (content.type === 'text') {
         try {
-          const parsed = JSON.parse(content.text);
-          return {
-            name: parsed.name || 'CustomAgent',
-            purpose: parsed.purpose || 'Custom functionality',
-            capabilities: parsed.capabilities || ['basic-processing'],
-            dependencies: parsed.dependencies || ['@anthropic-ai/sdk'],
-            structure: parsed.structure || {
-              core: [`${parsed.name || 'CustomAgent'}.ts`],
-              intelligence: [`${parsed.name || 'CustomAgent'}Intelligence.ts`],
-              communication: [`${parsed.name || 'CustomAgent'}Voice.ts`]
-            },
-            discordIntegration: parsed.discordIntegration !== false,
-            voicePersonality: parsed.voicePersonality || 'Professional and helpful',
-            createWatcher: parsed.createWatcher !== false,
-            watcherPurpose: parsed.watcherPurpose || `Learning patterns for ${parsed.name || 'agent'} optimization`
-          };
+          // Extract JSON from response
+          const jsonMatch = content.text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+              name: parsed.name || agentName,
+              purpose: parsed.purpose || `Agent for ${request}`,
+              capabilities: parsed.capabilities || ['basic-processing'],
+              dependencies: parsed.dependencies || ['@anthropic-ai/sdk'],
+              structure: parsed.structure || {
+                core: [`${agentName}.ts`],
+                intelligence: [`${agentName}Intelligence.ts`],
+                communication: [`${agentName}Voice.ts`]
+              },
+              discordIntegration: parsed.discordIntegration !== false,
+              voicePersonality: parsed.voicePersonality || 'Professional and helpful',
+              createWatcher: parsed.createWatcher !== false,
+              watcherPurpose: parsed.watcherPurpose || `Learning patterns for ${agentName} optimization`
+            };
+          }
+        } catch (parseError) {
+          console.error('[AgentBuilder] Failed to parse JSON from Claude:', parseError);
+        }
+      }
+    } catch (error) {
+      console.error('[AgentBuilder] Claude API failed:', error);
+    }
+
+    // Fallback spec
+    return this.createFallbackSpec(agentName, request);
+  }
+
+  private extractAgentNameFromRequest(request: string): string {
+    // Look for "Build a new X agent" or "Create X agent"
+    const patterns = [
+      /build a new (\w+) agent/i,
+      /create (\w+) agent/i,
+      /(\w+) agent for/i,
+      /new (\w+) agent/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = request.match(pattern);
+      if (match) {
+        return match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+      }
+    }
+    
+    // Default
+    return 'CustomAgent';
+  }
+
+  private createFallbackSpec(name: string, request: string): AgentSpec {
+    return {
+      name,
+      purpose: `Agent for ${request.slice(0, 100)}`,
+      capabilities: ['idea-management', 'queue-management', 'json-storage'],
+      dependencies: ['@anthropic-ai/sdk', 'discord.js'],
+      structure: {
+        core: [`${name}.ts`, `${name}Orchestrator.ts`],
+        intelligence: [`${name}Intelligence.ts`, `IdeaManager.ts`],
+        communication: [`${name}Voice.ts`, `${name}Discord.ts`]
+      },
+      discordIntegration: true,
+      voicePersonality: 'Professional and organized',
+      createWatcher: true,
+      watcherPurpose: `Learning optimization patterns for ${name}`
+    };
+  }
         } catch (parseError) {
           console.error('[AgentBuilder] Failed to parse agent spec:', parseError);
         }

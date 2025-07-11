@@ -10,15 +10,15 @@
     "watch": "nodemon --exec ts-node src/index.ts"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "@anthropic-ai/sdk": "^0.17.1",
-    "@octokit/rest": "^20.0.2",
-    "dotenv": "^16.3.1",
-    "axios": "^1.6.2"
+    "@anthropic-ai/sdk": "^0.17.2",
+    "@octokit/rest": "^20.1.2",
+    "axios": "^1.6.2",
+    "discord.js": "^14.21.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.4",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.3"
   }
 }

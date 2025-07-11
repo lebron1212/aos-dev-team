@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import Anthropic from '@anthropic-ai/sdk';
 
 interface FeedbackExample {
  id: string;
@@ -14,17 +15,17 @@ interface FeedbackExample {
 }
 
 export class FeedbackLearningSystem {
- private claude: any;
  private feedbackFile = 'data/commander-feedback.json';
  private examples: FeedbackExample[] = [];
+ private claude?: Anthropic;
  
  constructor(claudeApiKey?: string) {
    if (claudeApiKey) {
-     this.claude = new (require('@anthropic-ai/sdk')).default({ apiKey: claudeApiKey });
-   }   this.loadFeedback();
+     this.claude = new Anthropic({ apiKey: claudeApiKey });
+   }
+   this.loadFeedback();
  }
 
- // NEW: Handle both old and new method signatures
  async logFeedback(
    userInputOrParam1: string,
    commanderResponseOrParam2: string,
@@ -33,7 +34,6 @@ export class FeedbackLearningSystem {
    suggestedImprovementOrParam5?: string
  ): Promise<void> {
    
-   // Handle the Discord interface call: (input, response, type, context, suggestion)
    const userInput = userInputOrParam1;
    const commanderResponse = commanderResponseOrParam2;
    const feedbackType = feedbackTypeOrParam3;
@@ -79,13 +79,13 @@ export class FeedbackLearningSystem {
  }
 
  async detectFeedback(userMessage: string, lastResponse: string): Promise<boolean> {
-   // Use AI to detect if this is feedback about the previous response
+   if (!this.claude) {
+     console.log('[FeedbackLearning] No Claude API key, using fallback detection');
+     return /feedback|correction|better|instead|don't|avoid|DO NOT/i.test(userMessage);
+   }
+
    try {
-     const claude = new (await import('@anthropic-ai/sdk')).default({ 
-       apiKey: process.env.CLAUDE_API_KEY 
-     });
-     
-     const response = await claude.messages.create({
+     const response = await this.claude.messages.create({
        model: 'claude-3-haiku-20240307',
        max_tokens: 50,
        messages: [{
@@ -101,18 +101,19 @@ Is the user giving feedback/correction about the previous response? Answer only:
      return content.type === 'text' && content.text.trim().toUpperCase().includes('YES');
    } catch (error) {
      console.error('[FeedbackLearning] AI feedback detection failed, using fallback');
-     // Fallback to simple patterns only if AI fails
-     return /feedback|correction|better|instead|don't|avoid/i.test(userMessage);
+     return /feedback|correction|better|instead|don't|avoid|DO NOT/i.test(userMessage);
    }
  }
 
  async extractSuggestion(userFeedback: string, previousResponse: string): Promise<string | undefined> {
+   if (!this.claude) {
+     console.log('[FeedbackLearning] No Claude API key, using fallback extraction');
+     const match = userFeedback.match(/could just leave it at ['"]([^'"]+)['"]/i);
+     return match ? match[1].trim() : undefined;
+   }
+
    try {
-     const claude = new (await import('@anthropic-ai/sdk')).default({ 
-       apiKey: process.env.CLAUDE_API_KEY 
-     });
-     
-     const response = await claude.messages.create({
+     const response = await this.claude.messages.create({
        model: 'claude-3-haiku-20240307',
        max_tokens: 200,
        messages: [{
@@ -139,30 +140,20 @@ Examples:
      console.error('[FeedbackLearning] AI suggestion extraction failed');
    }
    
-   // Fallback to simple regex only if AI fails
-   const suggestionPatterns = [
-     /could just leave it at ['"]([^'"]+)['"]/i,
-     /try this instead:?\s*["']?([^"']+)["']?/i,
-     /better would be:?\s*["']?([^"']+)["']?/i,
-     /should have said:?\s*["']?([^"']+)["']?/i,
-     /more like:?\s*["']?([^"']+)["']?/i
-   ];
-   
-   for (const pattern of suggestionPatterns) {
-     const match = userFeedback.match(pattern);
-     if (match) return match[1].trim();
-   }
-   
-   return undefined;
+   const match = userFeedback.match(/could just leave it at ['"]([^'"]+)['"]/i);
+   return match ? match[1].trim() : undefined;
  }
 
  private async classifyFeedback(feedback: string, context?: string): Promise<'positive' | 'negative' | 'suggestion'> {
+   if (!this.claude) {
+     if (/DO NOT|don't|bad|wrong|terrible/i.test(feedback)) return 'negative';
+     if (/try|instead|better|should|more like|could just/i.test(feedback)) return 'suggestion';
+     if (/good|great|perfect|nice|love|excellent/i.test(feedback)) return 'positive';
+     return 'negative';
+   }
+
    try {
-     const claude = new (await import('@anthropic-ai/sdk')).default({ 
-       apiKey: process.env.CLAUDE_API_KEY 
-     });
-     
-     const response = await claude.messages.create({
+     const response = await this.claude.messages.create({
        model: 'claude-3-haiku-20240307',
        max_tokens: 50,
        messages: [{
@@ -190,14 +181,9 @@ Answer only: POSITIVE, NEGATIVE, or SUGGESTION`
      console.error('[FeedbackLearning] AI classification failed, using fallback');
    }
    
-   // Simple fallback if AI fails
-   const positive = /good|great|perfect|nice|love|excellent/i.test(feedback);
-   const negative = /DO NOT|don't|bad|wrong|terrible/i.test(feedback);
-   const suggestion = /try|instead|better|should|more like|could just/i.test(feedback);
-   
-   if (negative) return 'negative';
-   if (suggestion) return 'suggestion';
-   if (positive) return 'positive';
+   if (/DO NOT|don't|bad|wrong|terrible/i.test(feedback)) return 'negative';
+   if (/try|instead|better|should|more like|could just/i.test(feedback)) return 'suggestion';
+   if (/good|great|perfect|nice|love|excellent/i.test(feedback)) return 'positive';
    return 'negative';
  }
 

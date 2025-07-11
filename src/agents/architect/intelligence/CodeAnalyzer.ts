@@ -1,210 +1,177 @@
-import fs from 'fs/promises';
 import Anthropic from '@anthropic-ai/sdk';
-import { AnalysisResult } from '../types/index.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+interface AnalysisResult {
+  summary: string;
+  issues: string[];
+  recommendations: string[];
+  metrics: {
+    filesAnalyzed: number;
+    linesOfCode: number;
+    complexityScore: number;
+  };
+  apiUsage: {
+    tokens: number;
+    cost: number;
+    duration: number;
+  };
+}
 
 export class CodeAnalyzer {
   private claude: Anthropic;
+  private totalAPIUsage = { tokens: 0, cost: 0, calls: 0 };
 
   constructor(claudeApiKey: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
   }
 
-  async analyzeCodebase(request: string): Promise<AnalysisResult> {
-    console.log(`[CodeAnalyzer] AI analyzing: ${request}`);
+  async analyzeSystemHealth(targetPath: string = 'src'): Promise<AnalysisResult> {
+    console.log(`[CodeAnalyzer] 🔍 Starting system health analysis of ${targetPath}...`);
+    const startTime = Date.now();
     
-    // Get the actual code files
-    const targetFiles = await this.identifyTargetFiles(request);
-    const codeContent = await this.readCodeFiles(targetFiles);
-    
-    // Use Claude to analyze the code intelligently
-    const analysis = await this.performClaudeAnalysis(codeContent, request);
-    
-    return analysis;
-  }
-
-  async getSystemHealth(): Promise<AnalysisResult> {
-    const coreFiles = [
-      'src/agents/commander/communication/VoiceSystem.ts',
-      'src/agents/commander/intelligence/FeedbackLearningSystem.ts',
-      'src/agents/commander/core/UniversalRouter.ts',
-      'src/agents/watcher/comwatch/ComWatch.ts'
-    ];
-
-    console.log('[CodeAnalyzer] Claude analyzing system health...');
-    
-    const codeContent = await this.readCodeFiles(coreFiles);
-    
-    // Let Claude analyze the entire system
-    const systemAnalysis = await this.performClaudeAnalysis(
-      codeContent, 
-      "Analyze the overall health and status of this AI system. Look at code quality, architecture, potential issues, and suggestions for improvement."
-    );
-
-    return systemAnalysis;
-  }
-
-  private async performClaudeAnalysis(codeContent: Record<string, string>, request: string): Promise<AnalysisResult> {
-    
-    // Prepare code for Claude analysis
-    const codeText = Object.entries(codeContent)
-      .map(([file, content]) => {
-        const fileName = file.split('/').pop();
-        const truncatedContent = content.length > 3000 ? content.slice(0, 3000) + '\n// ... (truncated)' : content;
-        return `=== ${fileName} ===\n${truncatedContent}`;
-      })
-      .join('\n\n');
-
     try {
+      const files = await this.findRelevantFiles(targetPath);
+      console.log(`[CodeAnalyzer] 📁 Found ${files.length} files to analyze`);
+      
+      let totalLines = 0;
+      let analysisContent = '';
+      
+      for (const file of files.slice(0, 10)) { // Analyze up to 10 key files
+        try {
+          console.log(`[CodeAnalyzer] 📖 Reading ${file}...`);
+          const content = await fs.readFile(file, 'utf-8');
+          const lines = content.split('\n').length;
+          totalLines += lines;
+          
+          analysisContent += `\n=== ${file} (${lines} lines) ===\n${content.substring(0, 2000)}...\n`;
+          console.log(`[CodeAnalyzer] Read ${file}: ${content.length} chars`);
+        } catch (error) {
+          console.log(`[CodeAnalyzer] ⚠️ Could not read ${file}: ${error}`);
+        }
+      }
+
+      console.log(`[CodeAnalyzer] 🤖 Sending ${analysisContent.length} chars to Claude for analysis...`);
+      const analysisStart = Date.now();
+      
       const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
-        max_tokens: 1500,
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 500,
+        system: `You are a senior code architect analyzing a TypeScript AI system. Provide:
+1. Brief system overview
+2. Key architectural strengths  
+3. Critical issues found
+4. Specific recommendations
+5. Complexity assessment (1-10)
+
+Be specific and actionable.`,
         messages: [{
           role: 'user',
-          content: `You are a senior software architect analyzing this TypeScript AI system. 
-
-REQUEST: ${request}
-
-CODE TO ANALYZE:
-${codeText}
-
-Please analyze this code and provide insights in this JSON format:
-{
-  "summary": "Brief overview of what you found",
-  "issues": ["specific issue 1", "specific issue 2", "specific issue 3"],
-  "suggestions": ["actionable suggestion 1", "actionable suggestion 2"],
-  "complexity": "low|medium|high",
-  "healthScore": 85,
-  "keyFindings": ["important insight 1", "important insight 2"]
-}
-
-Be specific about actual code patterns, architecture decisions, potential bugs, and real improvements that could be made. Focus on what would actually help the developers.`
+          content: `Analyze this TypeScript AI system for health, architecture, and issues:\n\n${analysisContent}`
         }]
       });
 
-      const content = response.content[0];
-      if (content.type === 'text') {
-        try {
-          // Try to parse Claude's JSON response
-          const analysis = JSON.parse(content.text);
-          
-          return {
-            files: Object.keys(codeContent),
-            summary: analysis.summary || 'Analysis completed',
-            issues: analysis.issues || [],
-            suggestions: analysis.suggestions || [],
-            complexity: analysis.complexity || 'medium',
-            healthScore: analysis.healthScore || 75
-          };
-        } catch (parseError) {
-          // If JSON parsing fails, extract insights from text
-          return this.extractInsightsFromText(content.text, Object.keys(codeContent));
+      const analysisEnd = Date.now();
+      const analysisDuration = analysisEnd - analysisStart;
+      
+      // Track API usage
+      const tokens = response.usage ? response.usage.input_tokens + response.usage.output_tokens : 0;
+      const cost = response.usage ? this.calculateCost(response.usage.input_tokens, response.usage.output_tokens) : 0;
+      
+      this.totalAPIUsage.tokens += tokens;
+      this.totalAPIUsage.cost += cost;
+      this.totalAPIUsage.calls += 1;
+      
+      console.log(`[CodeAnalyzer] ⚡ Claude analysis: ${tokens} tokens, $${cost.toFixed(4)}, ${analysisDuration}ms`);
+      console.log(`[CodeAnalyzer] 💰 Session totals: ${this.totalAPIUsage.calls} calls, ${this.totalAPIUsage.tokens} tokens, $${this.totalAPIUsage.cost.toFixed(4)}`);
+
+      const analysisText = response.content[0]?.type === 'text' ? response.content[0].text : 'Analysis failed';
+      
+      // Parse Claude's response into structured data
+      const result = this.parseAnalysisResponse(analysisText, {
+        filesAnalyzed: files.length,
+        linesOfCode: totalLines,
+        apiTokens: tokens,
+        apiCost: cost,
+        duration: Date.now() - startTime
+      });
+
+      console.log(`[CodeAnalyzer] ✅ Analysis complete: ${result.issues.length} issues, ${result.recommendations.length} recommendations`);
+      return result;
+
+    } catch (error) {
+      console.error('[CodeAnalyzer] ❌ Analysis failed:', error);
+      throw error;
+    }
+  }
+
+  private async findRelevantFiles(basePath: string): Promise<string[]> {
+    const files: string[] = [];
+    
+    try {
+      const entries = await fs.readdir(basePath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(basePath, entry.name);
+        
+        if (entry.isDirectory() && !['node_modules', 'dist', 'logs', '.git'].includes(entry.name)) {
+          files.push(...await this.findRelevantFiles(fullPath));
+        } else if (entry.isFile() && fullPath.endsWith('.ts')) {
+          files.push(fullPath);
         }
       }
     } catch (error) {
-      console.error('[CodeAnalyzer] Claude analysis failed:', error);
-    }
-
-    // Fallback if Claude fails
-    return {
-      files: Object.keys(codeContent),
-      summary: 'Unable to perform detailed analysis - Claude API unavailable',
-      issues: ['Analysis service temporarily unavailable'],
-      suggestions: ['Retry analysis when Claude API is accessible'],
-      complexity: 'medium',
-      healthScore: 50
-    };
-  }
-
-  private extractInsightsFromText(text: string, files: string[]): AnalysisResult {
-    // Extract insights even if JSON parsing failed
-    const issues: string[] = [];
-    const suggestions: string[] = [];
-    
-    // Look for issue patterns in Claude's text
-    const issueLines = text.split('\n').filter(line => 
-      line.toLowerCase().includes('issue') ||
-      line.toLowerCase().includes('problem') ||
-      line.toLowerCase().includes('bug') ||
-      line.toLowerCase().includes('error')
-    );
-    
-    issueLines.slice(0, 3).forEach(line => {
-      const cleaned = line.replace(/[•\-*]/g, '').trim();
-      if (cleaned.length > 10) issues.push(cleaned);
-    });
-    
-    // Look for suggestion patterns
-    const suggestionLines = text.split('\n').filter(line =>
-      line.toLowerCase().includes('suggest') ||
-      line.toLowerCase().includes('improve') ||
-      line.toLowerCase().includes('could') ||
-      line.toLowerCase().includes('should')
-    );
-    
-    suggestionLines.slice(0, 3).forEach(line => {
-      const cleaned = line.replace(/[•\-*]/g, '').trim();
-      if (cleaned.length > 10) suggestions.push(cleaned);
-    });
-    
-    return {
-      files,
-      summary: text.split('\n')[0] || 'Analysis completed',
-      issues,
-      suggestions,
-      complexity: 'medium',
-      healthScore: 75
-    };
-  }
-
-  private async identifyTargetFiles(request: string): Promise<string[]> {
-    const requestLower = request.toLowerCase();
-    const files: string[] = [];
-
-    if (requestLower.includes('voice') || requestLower.includes('commander voice')) {
-      files.push('src/agents/commander/communication/VoiceSystem.ts');
+      console.log(`[CodeAnalyzer] Could not scan ${basePath}: ${error}`);
     }
     
-    if (requestLower.includes('feedback') || requestLower.includes('learning')) {
-      files.push('src/agents/commander/intelligence/FeedbackLearningSystem.ts');
-    }
-    
-    if (requestLower.includes('router') || requestLower.includes('routing')) {
-      files.push('src/agents/commander/core/UniversalRouter.ts');
-    }
-    
-    if (requestLower.includes('comwatch') || requestLower.includes('watcher')) {
-      files.push('src/agents/watcher/comwatch/ComWatch.ts');
-    }
-
-    if (requestLower.includes('commander') && !files.length) {
-      files.push('src/agents/commander/Commander.ts');
-      files.push('src/agents/commander/communication/VoiceSystem.ts');
-    }
-
-    // Default to core analysis
-    if (files.length === 0) {
-      files.push('src/agents/commander/communication/VoiceSystem.ts');
-      files.push('src/agents/commander/intelligence/FeedbackLearningSystem.ts');
-    }
-
-    console.log(`[CodeAnalyzer] Claude will analyze: ${files.join(', ')}`);
     return files;
   }
 
-  private async readCodeFiles(filePaths: string[]): Promise<Record<string, string>> {
-    const codeContent: Record<string, string> = {};
+  private parseAnalysisResponse(analysisText: string, metrics: any): AnalysisResult {
+    // Simple parsing - in practice, could use more sophisticated extraction
+    const lines = analysisText.split('\n');
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+    let summary = analysisText.substring(0, 200) + '...';
     
-    for (const filePath of filePaths) {
-      try {
-        const content = await fs.readFile(filePath, 'utf8');
-        codeContent[filePath] = content;
-        console.log(`[CodeAnalyzer] Read ${filePath}: ${content.length} chars`);
-      } catch (error) {
-        console.error(`[CodeAnalyzer] Failed to read ${filePath}:`, error);
-        codeContent[filePath] = `// File not accessible: ${error.message}`;
+    for (const line of lines) {
+      if (line.toLowerCase().includes('issue') || line.toLowerCase().includes('problem')) {
+        issues.push(line.trim());
+      }
+      if (line.toLowerCase().includes('recommend') || line.toLowerCase().includes('should')) {
+        recommendations.push(line.trim());
       }
     }
-    
-    return codeContent;
+
+    return {
+      summary,
+      issues: issues.length > 0 ? issues : ['No critical issues identified'],
+      recommendations: recommendations.length > 0 ? recommendations : ['System appears healthy'],
+      metrics: {
+        filesAnalyzed: metrics.filesAnalyzed,
+        linesOfCode: metrics.linesOfCode,
+        complexityScore: Math.min(10, Math.max(1, Math.floor(metrics.linesOfCode / 1000) + issues.length))
+      },
+      apiUsage: {
+        tokens: metrics.apiTokens,
+        cost: metrics.apiCost,
+        duration: metrics.duration
+      }
+    };
+  }
+
+  private calculateCost(inputTokens: number, outputTokens: number): number {
+    // Claude 3 Haiku pricing
+    const inputCost = (inputTokens / 1000000) * 0.25;
+    const outputCost = (outputTokens / 1000000) * 1.25;
+    return inputCost + outputCost;
+  }
+
+  getSessionStats() {
+    return {
+      totalCalls: this.totalAPIUsage.calls,
+      totalTokens: this.totalAPIUsage.tokens,
+      totalCost: this.totalAPIUsage.cost
+    };
   }
 }

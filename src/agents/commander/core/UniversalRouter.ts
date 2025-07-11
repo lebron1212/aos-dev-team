@@ -17,11 +17,10 @@ export class UniversalRouter {
   private workManager: WorkManager;
   private discordInterface: DiscordInterface;
   private claude: Anthropic;
-  
-  // Context storage
   private conversationContext: Map<string, any> = new Map();
- private comWatch: ComWatch;
- private feedbackSystem: FeedbackLearningSystem;
+  private comWatch: ComWatch;
+  private feedbackSystem: FeedbackLearningSystem;
+  private voiceSystem: VoiceSystem;
   
   constructor(config: CommanderConfig) {
     this.intentAnalyzer = new COM_L1_IntentAnalyzer(config.claudeApiKey);
@@ -30,11 +29,9 @@ export class UniversalRouter {
     this.workManager = new WorkManager();
     this.discordInterface = new DiscordInterface(config);
     this.claude = new Anthropic({ apiKey: config.claudeApiKey });
-   this.comWatch = new ComWatch();
-    // Share message context with DiscordInterface
-    if (this.discordInterface.getMessageContext) {
-      this.messageContext = this.discordInterface.getMessageContext();
-    }   this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
+    this.comWatch = new ComWatch();
+    this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
+    this.voiceSystem = new VoiceSystem(config.claudeApiKey, this.feedbackSystem);
   }
 
   async routeUniversalInput(
@@ -43,70 +40,52 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    console.log(`[UniversalRouter] Processing: "${input}" from user ${userId}`);
+    console.log(\`[UniversalRouter] Processing: "\${input}" from user \${userId}\`);
 
-      // CRITICAL: Track input immediately so feedback detection works
-      await this.discordInterface.trackMessage(input, "", messageId);
+    await this.discordInterface.trackMessage(input, "", messageId);
     
     try {
-      // Step 1: Get conversation history for context (temporary fallback)
       const messageHistory: Array<{content: string, author: string, timestamp: Date}> = [];
-      try {
-        // @ts-ignore - will be available after next deploy
-        if (this.discordInterface.getRecentMessages) {
-          messageHistory = await this.discordInterface.getRecentMessages(5);
-        }
-      } catch (error) {
-        console.log('[UniversalRouter] Message history not available yet');
-      }
       
-      // Step 2: Analyze intent with conversation context
       const context = this.getConversationContext(userId);
       context.conversationHistory = messageHistory;
       
       const intent = await this.intentAnalyzer.analyzeUniversalIntent(input, context);
       
-      console.log(`[UniversalRouter] Routed to: ${intent.category}/${intent.subcategory}`);
+      console.log(\`[UniversalRouter] Routed to: \${intent.category}/\${intent.subcategory}\`);
       
-      // Step 3: Route to appropriate handler
       let response: string;
       switch (intent.category) {
         case 'build':
           response = await this.handleBuildRequest(intent, userId, messageId);
           break;
-          
         case 'modify':
           response = await this.handleModifyRequest(intent, userId, messageId);
           break;
-          
         case 'analyze':
           response = await this.handleAnalyzeRequest(intent, userId, messageId);
           break;
-          
         case 'manage':
           response = await this.handleManageRequest(intent, userId, messageId);
           break;
-          
         case 'question':
           response = await this.handleQuestionRequest(intent, userId, messageId);
           break;
-          
         case 'conversation':
           response = await this.handleConversationRequest(intent, userId, messageId, messageHistory);
           break;
-          
         default:
-          response = `Not sure how to handle that request. Could you rephrase it?`;
+          response = \`Not sure how to handle that request. Could you rephrase it?\`;
       }
       
-      // Step 4: Track message for ComWatch and feedback system
       await this.discordInterface.updateTrackedMessage(messageId, response);
+      await this.comWatch.logCommanderInteraction(input, response, messageHistory.map(m => \`\${m.author}: \${m.content}\`));
       
       return response;
       
     } catch (error) {
       console.error('[UniversalRouter] Error:', error);
-      return `× System error processing request. Please try again or rephrase.`;
+      return \`× System error processing request. Please try again or rephrase.\`;
     }
   }
 
@@ -116,29 +95,21 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    // Step 1: Check if we need more requirements
     const gatheringResult = await this.requirementGatherer.analyzeRequirements(
       intent.parameters.description,
       intent.estimatedComplexity
     );
     
     if (!gatheringResult.shouldProceed && gatheringResult.nextQuestion) {
-      // Store context for next interaction
       this.storeConversationContext(userId, {
         pendingIntent: intent,
         gatheringInProgress: true,
         clarifiedRequest: gatheringResult.clarifiedRequest
       });
       
-      const questionResponse = VoiceSystem.formatResponse(
-        `${gatheringResult.nextQuestion}`,
-        { type: 'question' }
-      );
-      
-      return questionResponse;
+      return await this.voiceSystem.formatResponse(gatheringResult.nextQuestion, { type: 'question' });
     }
     
-    // Step 2: Create work item and thread
     const workItem = await this.workManager.createWorkItem({
       title: this.generateWorkItemTitle(intent),
       description: gatheringResult.clarifiedRequest || intent.parameters.description,
@@ -150,25 +121,22 @@ export class UniversalRouter {
       messageId
     });
     
-    // Step 3: Create Discord thread for this work item
     const thread = await this.discordInterface.createWorkItemThread(workItem);
     workItem.threadId = thread.id;
     
-    // Step 4: Start the work with orchestrator
     const orchestrationResult = await this.agentOrchestrator.executeWork(workItem);
     
-    // Step 5: Update context
     this.updateConversationContext(userId, {
       lastWorkItem: workItem.id,
       recentWorkItems: [workItem.id, ...(this.getConversationContext(userId).recentWorkItems || [])].slice(0, 5)
     });
     
-    const actionResponse = VoiceSystem.formatResponse(
-      `${workItem.id} started in thread`,
+    const actionResponse = await this.voiceSystem.formatResponse(
+      \`\${workItem.id} started in thread\`,
       { type: 'action', workItemId: workItem.id }
     );
     
-    return `▶ ${actionResponse}\n→ ${orchestrationResult.message}`;
+    return \`▶ \${actionResponse}\\n→ \${orchestrationResult.message}\`;
   }
 
   private async handleModifyRequest(
@@ -177,21 +145,19 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    // Find target work item
     const target = intent.parameters.target || this.getConversationContext(userId).lastWorkItem;
     
     if (!target) {
-      return `What would you like me to modify? I don't see any recent work to change.`;
+      return await this.voiceSystem.formatResponse("What would you like me to modify? I don't see any recent work to change.", { type: 'question' });
     }
     
     const workItem = await this.workManager.getWorkItem(target);
     if (!workItem) {
-      return `× Can't find the work item to modify. Could you be more specific?`;
+      return await this.voiceSystem.formatResponse("Can't find the work item to modify. Could you be more specific?", { type: 'error' });
     }
     
-    // Create modification work item
     const modificationItem = await this.workManager.createWorkItem({
-      title: `Modify: ${workItem.title}`,
+      title: \`Modify: \${workItem.title}\`,
       description: intent.parameters.description,
       originalRequest: intent.parameters.description,
       assignedAgents: intent.requiredAgents,
@@ -202,10 +168,9 @@ export class UniversalRouter {
       parentWorkItem: workItem.id
     });
     
-    // Execute modification
     const result = await this.agentOrchestrator.executeWork(modificationItem);
     
-    return `◆ Modifying ${workItem.id}\n→ ${result.message}`;
+    return \`◆ Modifying \${workItem.id}\\n→ \${result.message}\`;
   }
 
   private async handleAnalyzeRequest(
@@ -214,19 +179,15 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    // Route to appropriate analysis agent (TODO: implement analysis agents)
     switch (intent.subcategory) {
       case 'analyze-health':
-        return `■ Project Health Analysis\n→ Analyzing codebase health...\n(CodeAnalyzer agent TODO)`;
-        
+        return await this.voiceSystem.formatResponse("Project Health Analysis\\n→ Analyzing codebase health...\\n(CodeAnalyzer agent TODO)", { type: 'action' });
       case 'analyze-performance':
-        return `■ Performance Analysis\n→ Analyzing performance metrics...\n(PerformanceAnalyzer agent TODO)`;
-        
+        return await this.voiceSystem.formatResponse("Performance Analysis\\n→ Analyzing performance metrics...\\n(PerformanceAnalyzer agent TODO)", { type: 'action' });
       case 'analyze-code':
-        return `■ Code Analysis\n→ Reviewing code quality...\n(CodeAnalyzer agent TODO)`;
-        
+        return await this.voiceSystem.formatResponse("Code Analysis\\n→ Reviewing code quality...\\n(CodeAnalyzer agent TODO)", { type: 'action' });
       default:
-        return `■ Analysis Request\n→ ${intent.parameters.description}\n(Analysis agents TODO)`;
+        return await this.voiceSystem.formatResponse(\`Analysis Request\\n→ \${intent.parameters.description}\\n(Analysis agents TODO)\`, { type: 'action' });
     }
   }
 
@@ -239,12 +200,10 @@ export class UniversalRouter {
     switch (intent.subcategory) {
       case 'manage-work':
         return await this.workManager.handleWorkManagement(intent, userId);
-        
       case 'manage-deployment':
-        return `▶ Deployment Management\n→ ${intent.parameters.description}\n(Deployment features TODO)`;
-        
+        return await this.voiceSystem.formatResponse(\`Deployment Management\\n→ \${intent.parameters.description}\\n(Deployment features TODO)\`, { type: 'action' });
       default:
-        return `■ Management Request\n→ ${intent.parameters.description}`;
+        return await this.voiceSystem.formatResponse(\`Management Request\\n→ \${intent.parameters.description}\`, { type: 'action' });
     }
   }
 
@@ -254,8 +213,7 @@ export class UniversalRouter {
     messageId: string
   ): Promise<string> {
     
-    // Handle educational/informational questions
-    return `→ Question: ${intent.parameters.description}\nI can help with development questions!\n(Educational agent TODO)`;
+    return await this.voiceSystem.formatResponse(\`Question: \${intent.parameters.description}\\nI can help with development questions!\\n(Educational agent TODO)\`, { type: 'question' });
   }
 
   private async handleConversationRequest(
@@ -265,21 +223,10 @@ export class UniversalRouter {
     messageHistory: Array<{content: string, author: string, timestamp: Date}>
   ): Promise<string> {
     
-    // Build conversation context for Claude
-    const recentConversation = messageHistory
-      .slice(-5) // Last 5 messages
-      .map(msg => `${msg.author}: ${msg.content}`)
-      .join('\n');
+    const messageContext = (this.discordInterface as any).messageContext;
     
-    const timeContext = ContextProvider.getTimeContext();
-    const systemStatus = ContextProvider.getSystemStatus();
-   
-    // Get learned examples from feedback - THIS IS THE KEY FIX
-    const learningExamples = this.feedbackSystem.generateLearningExamples();
-
-    // Check if this is feedback about a previous response
     if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
-      const lastMessage = Array.from((this.discordInterface as any).messageContext?.values() || []).pop();
+      const lastMessage = messageContext ? Array.from(messageContext.values()).pop() : null;
       if (lastMessage) {
         const suggestion = await this.feedbackSystem.extractSuggestion(intent.parameters.description, lastMessage.response);
         await this.feedbackSystem.logFeedback(
@@ -290,42 +237,20 @@ export class UniversalRouter {
           suggestion
         );
         console.log("[UniversalRouter] Logged feedback from conversation handler");
+        
+        await this.comWatch.logCommanderInteraction(lastMessage.input, lastMessage.response, [], intent.parameters.description);
+        
+        return await this.voiceSystem.formatResponse("Got it. Learning from that.", { type: 'acknowledgment' });
       }
     }
-    console.log("[UniversalRouter] Learning examples:", JSON.stringify(learningExamples));   
-    const conversationPrompt = `Context: It's ${timeContext}. You are the AI Commander system.
-Recent conversation:
-${recentConversation}
-
-Current user message: "${intent.parameters.description}"
-
-${learningExamples}
-
-Respond appropriately to the conversation context and user's message. Apply all learned corrections to avoid repeating past mistakes.`;
-
-    try {
-      const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
-        max_tokens: 300,
-        system: VoiceSystem.getSystemPrompt() + learningExamples, // INJECT LEARNING HERE TOO
-        messages: [{ role: 'user', content: conversationPrompt }]
-      });
-      
-      const content = response.content[0];
-      if (content.type === 'text') {
-        const finalResponse = VoiceSystem.enhanceCTOVoice(content.text);
-        await this.comWatch.logCommanderInteraction(intent.parameters.description, finalResponse, messageHistory.map(m => `${m.author}: ${m.content}`));
-        return finalResponse;
-      }
-    } catch (error) {
-      console.error('[UniversalRouter] Conversation handling failed:', error);
-    }
-    
-    // Simple fallback if Claude fails
-    return `Ready to build. What's the vision?`;
+   
+    return await this.voiceSystem.generateConversationResponse(
+      intent.parameters.description,
+      messageHistory,
+      ContextProvider.getTimeContext()
+    );
   }
 
-  // Context management
   private getConversationContext(userId: string): any {
     return this.conversationContext.get(userId) || {};
   }
@@ -340,11 +265,7 @@ Respond appropriately to the conversation context and user's message. Apply all 
   
   private generateWorkItemTitle(intent: UniversalIntent): string {
     const description = intent.parameters.description;
-    
-    // Extract key terms for a concise title
     if (description.length <= 50) return description;
-    
-    // Use AI to generate a concise title (for now, simple truncation)
     return description.substring(0, 47) + '...';
   }
 }

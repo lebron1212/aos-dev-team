@@ -135,6 +135,29 @@ Be specific and actionable.`,
     }
   }
 
+  async analyzeCodebase(description: string): Promise<any> {
+    console.log('[CodeAnalyzer] 🔍 Analyzing codebase for:', description);
+    try {
+      const result = await this.analyzeSystemHealth();
+      return {
+        summary: result.summary,
+        issues: result.issues,
+        suggestions: result.recommendations,
+        healthScore: Math.max(0, 100 - result.metrics.complexityScore * 10),
+        files: await this.findRelevantFiles('src')
+      };
+    } catch (error) {
+      console.error('[CodeAnalyzer] ❌ analyzeCodebase failed:', error);
+      return {
+        summary: 'Codebase analysis failed',
+        issues: ['Analysis unavailable'],
+        suggestions: ['Retry analysis'],
+        healthScore: 50,
+        files: []
+      };
+    }
+  }
+
   private async findRelevantFiles(basePath: string): Promise<string[]> {
     const files: string[] = [];
     

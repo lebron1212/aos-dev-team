@@ -1,6 +1,7 @@
 import { COM_L1_IntentAnalyzer } from '../intelligence/COM-L1-IntentAnalyzer.js';
 import { RequirementGatherer } from '../intelligence/RequirementGatherer.js';
 import { AgentOrchestrator } from './AgentOrchestrator.js';
+import { BotOrchestrator } from './BotOrchestrator.js';
 import { WorkManager } from '../workflow/WorkManager.js';
 import { DiscordInterface } from '../communication/DiscordInterface.js';
 import { VoiceSystem } from '../communication/VoiceSystem.js';
@@ -14,6 +15,7 @@ export class UniversalRouter {
   private intentAnalyzer: COM_L1_IntentAnalyzer;
   private requirementGatherer: RequirementGatherer;
   private agentOrchestrator: AgentOrchestrator;
+  private botOrchestrator: BotOrchestrator;
   private workManager: WorkManager;
   private discordInterface: DiscordInterface;
   private claude: Anthropic;
@@ -32,6 +34,7 @@ export class UniversalRouter {
     this.comWatch = new ComWatch();
     this.feedbackSystem = new FeedbackLearningSystem(config.claudeApiKey);
     this.voiceSystem = new VoiceSystem(config.claudeApiKey, this.feedbackSystem);
+    this.botOrchestrator = new BotOrchestrator(config.claudeApiKey, this.discordInterface);
   }
 
   async routeUniversalInput(
@@ -53,6 +56,25 @@ export class UniversalRouter {
         await this.discordInterface.updateTrackedMessage(messageId, debugResponse);
         return debugResponse;
       }
+
+      // Check for bot management commands
+      const botManagementResponse = await this.handleBotManagement(input);
+      if (botManagementResponse) {
+        await this.discordInterface.updateTrackedMessage(messageId, botManagementResponse);
+        return botManagementResponse;
+      }
+      
+      // DELEGATION LOGIC - Check if request should be delegated to specialist bot
+      const delegationDecision = await this.botOrchestrator.shouldDelegate(input, userId);
+      
+      if (delegationDecision.delegate && delegationDecision.botName) {
+        console.log(`[UniversalRouter] Delegating to ${delegationDecision.botName}: ${delegationDecision.reason}`);
+        const delegationResponse = await this.botOrchestrator.delegateToBot(delegationDecision.botName, input, userId);
+        await this.discordInterface.updateTrackedMessage(messageId, delegationResponse);
+        return delegationResponse;
+      }
+      
+      console.log(`[UniversalRouter] Handling with Commander: ${delegationDecision.reason || 'No suitable specialist bot'}`);
       
       const context = this.getConversationContext(userId);
       context.conversationHistory = messageHistory;
@@ -96,6 +118,39 @@ export class UniversalRouter {
     }
   }
 
+  private async handleBotManagement(input: string): Promise<string | null> {
+    const lowerInput = input.toLowerCase();
+    
+    if (lowerInput.includes('bot status') || lowerInput.includes('available bots')) {
+      return await this.botOrchestrator.getBotStatus();
+    }
+    
+    if (lowerInput.includes('register bot') || lowerInput.includes('add bot')) {
+      // This would be called by newly created bots to register themselves
+      return await this.voiceSystem.formatResponse("Bots register automatically when created by the Architect.", { type: 'info' });
+    }
+    
+    if (lowerInput.includes('remove bot') && lowerInput.includes(' ')) {
+      const botName = lowerInput.split('remove bot ')[1]?.trim();
+      if (botName) {
+        const removed = await this.botOrchestrator.removeBotFromSystem(botName);
+        if (removed) {
+          return await this.voiceSystem.formatResponse(`Removed ${botName} from the system.`, { type: 'completion' });
+        } else {
+          return await this.voiceSystem.formatResponse(`Bot ${botName} not found.`, { type: 'error' });
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // Method for newly created bots to register themselves
+  async registerNewBot(name: string, purpose: string, capabilities: string[], channelId: string): Promise<void> {
+    await this.botOrchestrator.registerBot(name, purpose, capabilities, channelId);
+  }
+
+  // Keep all existing methods from the previous version...
   private async handleBuildRequest(
     intent: UniversalIntent, 
     userId: string, 
@@ -238,7 +293,6 @@ export class UniversalRouter {
     
     const messageContext = (this.discordInterface as any).messageContext;
     
-    // Handle feedback through VoiceSystem
     if (intent.subcategory === "conversation-feedback" || intent.subcategory?.includes("feedback")) {
       const lastMessage = messageContext ? Array.from(messageContext.values()).pop() : null;
       if (lastMessage) {
@@ -254,7 +308,6 @@ export class UniversalRouter {
         
         await this.comWatch.logCommanderInteraction(lastMessage.input, lastMessage.response, [], intent.parameters.description);
         
-        // Use VoiceSystem to generate contextual feedback acknowledgment
         return await this.voiceSystem.generateFeedbackResponse(
           intent.parameters.description,
           lastMessage.response,
@@ -270,7 +323,7 @@ export class UniversalRouter {
     );
   }
 
-  // Debug methods for checking feedback and learning
+  // Keep all debug and utility methods from previous version...
   private async handleDebugRequest(input: string): Promise<string | null> {
     const lowerInput = input.toLowerCase();
     
@@ -286,7 +339,7 @@ export class UniversalRouter {
       return await this.showRecentInteractions();
     }
     
-    return null; // Not a debug command
+    return null;
   }
 
   private async showLearnedFeedback(): Promise<string> {
@@ -343,7 +396,6 @@ ${insights.length > 0 ? 'Insights:\n' + insights.join('\n') : 'No insights yet.'
 
   private async getFeedbackCount(): Promise<number> {
     try {
-      // Access the feedback system's stored examples
       return (this.feedbackSystem as any).examples?.length || 0;
     } catch (error) {
       return 0;

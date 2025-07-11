@@ -187,3 +187,35 @@ export class DiscordInterface {
    return !!this.userChannel;
  }
 }
+
+  // Add to DiscordInterface class
+  async sendMessageToChannel(channelId: string, content: string): Promise<void> {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (channel && channel.isTextBased()) {
+        await channel.send(content);
+        console.log(`[DiscordInterface] Sent delegation message to channel ${channelId}`);
+      } else {
+        console.error(`[DiscordInterface] Channel ${channelId} not found or not text-based`);
+      }
+    } catch (error) {
+      console.error(`[DiscordInterface] Failed to send message to channel ${channelId}:`, error);
+    }
+  }
+
+  async getAllChannels(): Promise<Array<{id: string, name: string}>> {
+    const channels: Array<{id: string, name: string}> = [];
+    
+    this.client.guilds.cache.forEach(guild => {
+      guild.channels.cache.forEach(channel => {
+        if (channel.isTextBased()) {
+          channels.push({
+            id: channel.id,
+            name: channel.name || 'Unknown'
+          });
+        }
+      });
+    });
+    
+    return channels;
+  }

@@ -1036,3 +1036,52 @@ export * from './types/index.js';`;
     
     return buildResult;
   }
+
+  // Add auto-registration method to AgentBuilder
+  private async registerBotWithCommander(spec: AgentSpec, channelId: string): Promise<void> {
+    try {
+      // This would be called during agent creation to register with Commander
+      console.log(`[AgentBuilder] Registering ${spec.name} with Commander's BotOrchestrator`);
+      
+      // In a real implementation, this could make an API call to Commander
+      // or write to a shared registry file that Commander monitors
+      
+      const registrationData = {
+        name: spec.name,
+        purpose: spec.purpose,
+        capabilities: spec.capabilities,
+        channelId: channelId,
+        registeredAt: new Date().toISOString()
+      };
+      
+      // Write to shared registry file
+      const fs = await import('fs/promises');
+      await fs.mkdir('data', { recursive: true });
+      
+      let existingBots = [];
+      try {
+        const existing = await fs.readFile('data/registered-bots.json', 'utf8');
+        existingBots = JSON.parse(existing);
+      } catch (error) {
+        // File doesn't exist yet
+      }
+      
+      // Add new bot to registry
+      existingBots.push({
+        name: spec.name,
+        purpose: spec.purpose,
+        capabilities: spec.capabilities,
+        channelId,
+        isOnline: true,
+        specialties: spec.capabilities,
+        lastSeen: new Date().toISOString()
+      });
+      
+      await fs.writeFile('data/registered-bots.json', JSON.stringify(existingBots, null, 2));
+      
+      console.log(`[AgentBuilder] ${spec.name} registered with Commander for delegation`);
+      
+    } catch (error) {
+      console.error(`[AgentBuilder] Failed to register ${spec.name} with Commander:`, error);
+    }
+  }

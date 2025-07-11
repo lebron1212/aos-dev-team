@@ -6,6 +6,8 @@ export class TrainingCollector {
 
  async logInteraction(input: string, response: string, context: string[]): Promise<void> {
    const example = {
+     timeOfDay: new Date().getHours(),
+     dayOfWeek: new Date().getDay(),
      timestamp: new Date().toISOString(),
      input,
      response,

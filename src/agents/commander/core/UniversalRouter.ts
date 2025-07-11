@@ -7,6 +7,7 @@ import { VoiceSystem } from '../communication/VoiceSystem.js';
 import { UniversalIntent, WorkItem, CommanderConfig } from '../types/index.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { ComWatch } from '../../watcher/comwatch/ComWatch.js';
+import { ContextProvider } from '../intelligence/ContextProvider.js';
 
 export class UniversalRouter {
   private intentAnalyzer: COM_L1_IntentAnalyzer;
@@ -249,7 +250,12 @@ export class UniversalRouter {
       .map(msg => `${msg.author}: ${msg.content}`)
       .join('\n');
     
-    const conversationPrompt = `Recent conversation:
+    const timeContext = ContextProvider.getTimeContext();
+   const systemStatus = ContextProvider.getSystemStatus();
+   
+   const conversationPrompt = `Time: ${timeContext}
+System: ${systemStatus}
+Recent conversation:
 ${recentConversation}
 
 Current user message: "${intent.parameters.description}"

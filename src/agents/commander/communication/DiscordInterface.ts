@@ -9,8 +9,8 @@ export class DiscordInterface {
   private config: CommanderConfig;
   private workItemEmbeds: Map<string, Message> = new Map();
   private workItemThreads: Map<string, ThreadChannel> = new Map();
- private feedbackSystem: FeedbackLearningSystem;
- private messageContext: Map<string, {input: string, response: string}> = new Map();
+  private feedbackSystem: FeedbackLearningSystem;
+  private messageContext: Map<string, {input: string, response: string}> = new Map();
 
   constructor(config: CommanderConfig) {
     this.config = config;
@@ -25,7 +25,7 @@ export class DiscordInterface {
     });
     this.setupEventHandlers();
     this.setupFeedbackReactions();
-   this.feedbackSystem = new FeedbackLearningSystem();
+    this.feedbackSystem = new FeedbackLearningSystem();
   }
 
   private setupEventHandlers(): void {
@@ -57,9 +57,24 @@ export class DiscordInterface {
       
       if (feedbackType) {
         console.log(`[Discord] Feedback: ${emoji} (${feedbackType})`);
-       await this.handleFeedbackReaction(reaction.message.id, feedbackType, user.id);
+        await this.handleFeedbackReaction(reaction.message.id, feedbackType, user.id);
       }
     });
+  }
+
+  async handleFeedbackReaction(messageId: string, feedbackType: string, userId: string): Promise<void> {
+    const context = this.messageContext.get(messageId);
+    if (!context) return;
+    
+    if (feedbackType === 'suggestion') {
+      await this.sendMessage('What should I have said instead? Reply with your suggestion.');
+    } else {
+      await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
+    }
+  }
+
+  async trackMessage(input: string, response: string, messageId: string): Promise<void> {
+    this.messageContext.set(messageId, { input, response });
   }
 
   async setupVMTIntegration(): Promise<void> {
@@ -88,21 +103,3 @@ export class DiscordInterface {
     return !!this.userChannel;
   }
 }
-
-
- async handleFeedbackReaction(messageId: string, feedbackType: string, userId: string): Promise<void> {
-   const context = this.messageContext.get(messageId);
-   if (!context) return;
-   
-   if (feedbackType === 'suggestion') {
-     await this.sendMessage('What should I have said instead? Reply with your suggestion.');
-     // Wait for next message from user as suggestion
-     this.waitingForSuggestion = messageId;
-   } else {
-     await this.feedbackSystem.logFeedback(context.input, context.response, feedbackType, 'Discord reaction');
-   }
- }
-
- async trackMessage(input: string, response: string, messageId: string): Promise<void> {
-   this.messageContext.set(messageId, { input, response });
- }

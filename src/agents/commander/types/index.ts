@@ -118,3 +118,36 @@ export interface AgentCapability {
   estimatedTime: (request: string) => number; // minutes
   isAvailable: () => boolean;
 }
+
+// PR Creation Types
+export interface PRRefinementSession {
+  userId: string;
+  sessionId: string;
+  repository?: 'aurora' | 'aos-dev-team';
+  title?: string;
+  description?: string;
+  branchName?: string;
+  labels?: string[];
+  isDraft?: boolean;
+  baseBranch?: string;
+  needsClarification: string[];
+  isComplete: boolean;
+  startTime: Date;
+}
+
+export interface CreatePRParams {
+  repository: 'aurora' | 'aos-dev-team';
+  title: string;
+  description: string;
+  head: string; // source branch
+  base: string; // target branch (usually 'main')
+  assignees?: string[];
+  reviewers?: string[];
+  labels?: string[];
+  draft?: boolean;
+}
+
+export interface PRResult {
+  prNumber: number;
+  prUrl: string;
+}

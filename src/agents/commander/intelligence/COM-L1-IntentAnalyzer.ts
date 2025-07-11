@@ -29,7 +29,7 @@ LEVEL 1 CATEGORIES:
 - build: Create something new (UI, API, feature, component, app, etc.)
 - modify: Change existing work (fix, update, enhance, style, etc.)  
 - analyze: Examine/inspect (code review, performance, health, debug)
-- manage: Control workflow (pause, cancel, status, deploy, etc.)
+- manage: Control workflow (pause, cancel, status, deploy, PR creation, etc.)
 - question: Ask for information (how to, what is, explain, etc.)
 - conversation: General chat, feedback, thanks, off-topic requests, casual talk
 
@@ -37,7 +37,7 @@ LEVEL 2 SUBCATEGORIES (examples):
 - build: build-ui, build-api, build-integration, build-full-app
 - modify: modify-existing, modify-style, modify-behavior, modify-content
 - analyze: analyze-code, analyze-performance, analyze-health  
-- manage: manage-work, manage-deployment, manage-project
+- manage: manage-work, manage-deployment, manage-project, manage-pr
 
 LEVEL 3 SPECIFIC (examples):
 - build-ui: build-ui-component, build-ui-form, build-ui-page, build-ui-layout
@@ -67,6 +67,8 @@ EXAMPLES:
 "Cancel the login work" → manage/manage-work/manage-cancel, [Commander], simple
 "What is React?" → question/question-concept/question-tech-concept, [Commander], simple
 "Thanks, looks great!" → conversation/conversation-positive/conversation-feedback, [MemoryService], simple
+"Create PR for authentication" → manage/manage-pr/manage-pr-create, [Commander], simple
+"Make a pull request for Aurora" → manage/manage-pr/manage-pr-create, [Commander], simple
 
 Be intelligent about context. If user says "make it bigger" and recent work was a button, it's modify-component-style targeting that button.
 

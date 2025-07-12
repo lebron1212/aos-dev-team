@@ -4,14 +4,32 @@ import { promises as fs } from 'fs';
 import { execSync } from 'child_process';
 import { DiscordBotCreator } from './DiscordBotCreator.js';
 
+interface FileWriteResult {
+  success: boolean;
+  path: string;
+  error?: string;
+  size?: number;
+}
+
 export class AgentBuilder {
   private claude: Anthropic;
   private discordCreator?: DiscordBotCreator;
+  private isRailway: boolean;
+  private agentStore: Map<string, AgentSpec> = new Map(); // Memory fallback
 
   constructor(claudeApiKey: string, discordToken?: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
     if (discordToken) {
       this.discordCreator = new DiscordBotCreator(claudeApiKey, discordToken);
+    }
+    
+    // Detect Railway environment
+    this.isRailway = process.env.RAILWAY_ENVIRONMENT === 'production' || 
+                     process.env.NODE_ENV === 'production' ||
+                     !!process.env.RAILWAY_PROJECT_ID;
+    
+    if (this.isRailway) {
+      console.log('[AgentBuilder] 🚂 Railway detected - using enhanced file handling');
     }
   }
 
@@ -57,7 +75,7 @@ Return ONLY this JSON structure with no other text:
           const jsonMatch = content.text.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
-            return {
+            const spec = {
               name: parsed.name || agentName,
               purpose: parsed.purpose || `Agent for ${request}`,
               capabilities: parsed.capabilities || ['basic-processing'],
@@ -72,6 +90,10 @@ Return ONLY this JSON structure with no other text:
               createWatcher: parsed.createWatcher !== false,
               watcherPurpose: parsed.watcherPurpose || `Learning patterns for ${agentName} optimization`
             };
+            
+            // Store in memory as backup
+            this.agentStore.set(spec.name, spec);
+            return spec;
           }
         } catch (parseError) {
           console.error('[AgentBuilder] Failed to parse JSON from Claude:', parseError);
@@ -82,7 +104,9 @@ Return ONLY this JSON structure with no other text:
     }
 
     // Fallback spec
-    return this.createFallbackSpec(agentName, request);
+    const fallbackSpec = this.createFallbackSpec(agentName, request);
+    this.agentStore.set(fallbackSpec.name, fallbackSpec);
+    return fallbackSpec;
   }
 
   private extractAgentNameFromRequest(request: string): string {
@@ -91,7 +115,9 @@ Return ONLY this JSON structure with no other text:
       /build a new (\w+) agent/i,
       /create (\w+) agent/i,
       /(\w+) agent for/i,
-      /new (\w+) agent/i
+      /new (\w+) agent/i,
+      /build agent (\w+)/i,  // Added for "/build agent NAME" format
+      /agent (\w+)/i
     ];
     
     for (const pattern of patterns) {
@@ -139,49 +165,84 @@ Return ONLY this JSON structure with no other text:
     const agentPath = `src/agents/${spec.name.toLowerCase()}`;
     const watcherPath = `src/agents/watcher/${spec.name.toLowerCase()}watch`;
     const createdFiles: string[] = [];
+    const fileResults: FileWriteResult[] = [];
     
     // Check if agent already exists
     if (await this.directoryExists(agentPath)) {
-      return {
-        summary: `Agent ${spec.name} already exists`,
-        ready: false,
-        error: 'Agent directory already exists'
-      };
+      console.log(`[AgentBuilder] Directory exists, checking for conflicts...`);
+      // Allow overwrite in development, warn in production
+      if (this.isRailway) {
+        console.warn(`[AgentBuilder] Agent ${spec.name} directory exists but on Railway - proceeding with update`);
+      } else {
+        return {
+          summary: `Agent ${spec.name} already exists - use modify command to update`,
+          ready: false,
+          error: 'Agent directory already exists'
+        };
+      }
     }
     
     try {
-      // 1. Create directory structures
-      await this.createAgentDirectories(agentPath);
+      // Store in memory first (always works)
+      this.agentStore.set(spec.name, spec);
+      
+      // 1. Create directory structures with verification
+      await this.createAgentDirectoriesWithVerification(agentPath, fileResults);
       if (spec.createWatcher) {
-        await this.createWatcherDirectories(watcherPath);
+        await this.createWatcherDirectoriesWithVerification(watcherPath, fileResults);
       }
       
       // 2. Generate files sequentially to avoid conflicts
-      const coreFiles = await this.generateCoreFiles(spec, agentPath);
-      createdFiles.push(...coreFiles);
+      const coreFiles = await this.generateCoreFilesWithVerification(spec, agentPath);
+      createdFiles.push(...coreFiles.map(f => f.path));
+      fileResults.push(...coreFiles);
       
-      const intelligenceFiles = await this.generateIntelligenceFiles(spec, agentPath);
-      createdFiles.push(...intelligenceFiles);
+      const intelligenceFiles = await this.generateIntelligenceFilesWithVerification(spec, agentPath);
+      createdFiles.push(...intelligenceFiles.map(f => f.path));
+      fileResults.push(...intelligenceFiles);
       
-      const commFiles = await this.generateCommunicationFiles(spec, agentPath);
-      createdFiles.push(...commFiles);
+      const commFiles = await this.generateCommunicationFilesWithVerification(spec, agentPath);
+      createdFiles.push(...commFiles.map(f => f.path));
+      fileResults.push(...commFiles);
       
-      // 3. Generate types
-      const typesFile = await this.generateTypesFile(spec, agentPath);
-      createdFiles.push(typesFile);
+      // 3. Generate types with verification
+      const typesResult = await this.generateTypesFileWithVerification(spec, agentPath);
+      createdFiles.push(typesResult.path);
+      fileResults.push(typesResult);
       
-      // 4. Generate index file
-      const indexFile = await this.generateIndexFile(spec, agentPath);
-      createdFiles.push(indexFile);
+      // 4. Generate index file with verification
+      const indexResult = await this.generateIndexFileWithVerification(spec, agentPath);
+      createdFiles.push(indexResult.path);
+      fileResults.push(indexResult);
       
       // 5. Generate watcher if requested
       if (spec.createWatcher) {
-        const watcherFiles = await this.generateWatcherFiles(spec, watcherPath);
-        createdFiles.push(...watcherFiles);
+        const watcherFiles = await this.generateWatcherFilesWithVerification(spec, watcherPath);
+        createdFiles.push(...watcherFiles.map(f => f.path));
+        fileResults.push(...watcherFiles);
       }
       
       // 6. Update main index.ts to include new agent
-      await this.updateMainIndexSafely(spec);
+      try {
+        await this.updateMainIndexSafely(spec);
+      } catch (error) {
+        console.warn('[AgentBuilder] Failed to update main index, continuing...', error);
+      }
+      
+      // Calculate success metrics
+      const successCount = fileResults.filter(r => r.success).length;
+      const totalFiles = fileResults.length;
+      
+      console.log(`[AgentBuilder] File operations: ${successCount}/${totalFiles} successful`);
+      
+      // Log detailed results
+      fileResults.forEach(result => {
+        if (result.success) {
+          console.log(`[AgentBuilder] ✅ ${result.path} (${result.size || 0} bytes)`);
+        } else {
+          console.error(`[AgentBuilder] ❌ ${result.path}: ${result.error}`);
+        }
+      });
       
       // 7. Create Discord bot if integration is enabled
       let discordBotCreated = false;
@@ -217,28 +278,85 @@ Return ONLY this JSON structure with no other text:
       
       // 8. Register with Commander
       if (spec.discordIntegration) {
-        await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
+        try {
+          await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
+        } catch (error) {
+          console.warn('[AgentBuilder] Failed to register with Commander:', error);
+        }
       }
       
-      // 9. Commit the new agent 
-      await this.commitNewAgent(spec, createdFiles);
+      // 9. Commit the new agent (only if files were actually written)
+      if (successCount > 0 && !this.isRailway) {
+        try {
+          await this.commitNewAgent(spec, createdFiles);
+        } catch (error) {
+          console.warn('[AgentBuilder] Failed to commit to git:', error);
+        }
+      }
       
-      return {
-        summary: `Agent ${spec.name} created with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,
-        files: createdFiles,
-        capabilities: spec.capabilities,
-        ready: true,
-        discordSetupNeeded: spec.discordIntegration && !discordBotCreated,
-        discordBotCreated,
-        botToken: discordBotCreated ? botToken : undefined,
-        channelId: channelId || undefined,
-        inviteUrl: discordBotCreated ? inviteUrl : undefined,
-        watcherCreated: spec.createWatcher,
-        environmentVars: spec.discordIntegration ? [
-          `${spec.name.toUpperCase()}_DISCORD_TOKEN`,
-          `${spec.name.toUpperCase()}_CHANNEL_ID`
-        ] : []
-      };
+      // Determine overall success
+      const isFullSuccess = successCount === totalFiles;
+      const isPartialSuccess = successCount > 0;
+      
+      if (isFullSuccess) {
+        return {
+          summary: `✅ Agent ${spec.name} created successfully with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,
+          files: createdFiles,
+          capabilities: spec.capabilities,
+          ready: true,
+          discordSetupNeeded: spec.discordIntegration && !discordBotCreated,
+          discordBotCreated,
+          botToken: discordBotCreated ? botToken : undefined,
+          channelId: channelId || undefined,
+          inviteUrl: discordBotCreated ? inviteUrl : undefined,
+          watcherCreated: spec.createWatcher,
+          environmentVars: spec.discordIntegration ? [
+            `${spec.name.toUpperCase()}_DISCORD_TOKEN`,
+            `${spec.name.toUpperCase()}_CHANNEL_ID`
+          ] : [],
+          fileResults: {
+            total: totalFiles,
+            successful: successCount,
+            failed: totalFiles - successCount
+          }
+        };
+      } else if (isPartialSuccess) {
+        return {
+          summary: `⚠️ Agent ${spec.name} partially created (${successCount}/${totalFiles} files). ${this.isRailway ? 'This is expected on Railway ephemeral filesystem.' : 'Some file operations failed.'}`,
+          files: createdFiles,
+          capabilities: spec.capabilities,
+          ready: true, // Agent is stored in memory and partially functional
+          discordSetupNeeded: spec.discordIntegration && !discordBotCreated,
+          discordBotCreated,
+          botToken: discordBotCreated ? botToken : undefined,
+          channelId: channelId || undefined,
+          inviteUrl: discordBotCreated ? inviteUrl : undefined,
+          watcherCreated: spec.createWatcher,
+          environmentVars: spec.discordIntegration ? [
+            `${spec.name.toUpperCase()}_DISCORD_TOKEN`,
+            `${spec.name.toUpperCase()}_CHANNEL_ID`
+          ] : [],
+          fileResults: {
+            total: totalFiles,
+            successful: successCount,
+            failed: totalFiles - successCount,
+            details: fileResults.filter(r => !r.success).map(r => `${r.path}: ${r.error}`)
+          }
+        };
+      } else {
+        return {
+          summary: `❌ Agent ${spec.name} creation failed - no files written to disk. Agent stored in memory only.`,
+          files: [],
+          ready: false,
+          error: 'All file write operations failed',
+          fileResults: {
+            total: totalFiles,
+            successful: 0,
+            failed: totalFiles,
+            details: fileResults.map(r => `${r.path}: ${r.error}`)
+          }
+        };
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -252,6 +370,196 @@ Return ONLY this JSON structure with no other text:
     }
   }
 
+  // Enhanced file writing with verification
+  private async writeFileWithVerification(filePath: string, content: string): Promise<FileWriteResult> {
+    try {
+      // Ensure directory exists
+      await this.ensureDirectoryExists(filePath);
+      
+      // Write file
+      await fs.writeFile(filePath, content, 'utf8');
+      
+      // Verify file was written
+      const stats = await fs.stat(filePath);
+      
+      // Basic content verification
+      const writtenContent = await fs.readFile(filePath, 'utf8');
+      if (writtenContent.length !== content.length) {
+        throw new Error(`Content verification failed: expected ${content.length} chars, got ${writtenContent.length}`);
+      }
+
+      return {
+        success: true,
+        path: filePath,
+        size: stats.size
+      };
+
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        success: false,
+        path: filePath,
+        error: errorMsg
+      };
+    }
+  }
+
+  private async ensureDirectoryExists(filePath: string): Promise<void> {
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    try {
+      await fs.mkdir(dir, { recursive: true });
+    } catch (error) {
+      // Directory might already exist, that's ok
+    }
+  }
+
+  private async createAgentDirectoriesWithVerification(basePath: string, results: FileWriteResult[]): Promise<void> {
+    const dirs = [
+      basePath,
+      `${basePath}/core`,
+      `${basePath}/intelligence`, 
+      `${basePath}/communication`,
+      `${basePath}/types`
+    ];
+    
+    for (const dir of dirs) {
+      try {
+        await fs.mkdir(dir, { recursive: true });
+        results.push({ success: true, path: dir });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        results.push({ success: false, path: dir, error: errorMsg });
+      }
+    }
+  }
+
+  private async createWatcherDirectoriesWithVerification(basePath: string, results: FileWriteResult[]): Promise<void> {
+    const dirs = [
+      basePath,
+      `${basePath}/core`,
+      `${basePath}/intelligence`, 
+      `${basePath}/communication`,
+      `${basePath}/types`
+    ];
+    
+    for (const dir of dirs) {
+      try {
+        await fs.mkdir(dir, { recursive: true });
+        results.push({ success: true, path: dir });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        results.push({ success: false, path: dir, error: errorMsg });
+      }
+    }
+  }
+
+  private async generateCoreFilesWithVerification(spec: AgentSpec, basePath: string): Promise<FileWriteResult[]> {
+    const results: FileWriteResult[] = [];
+    
+    const mainFile = `${basePath}/${spec.name}.ts`;
+    const mainContent = await this.generateMainAgentFile(spec);
+    const result = await this.writeFileWithVerification(mainFile, mainContent);
+    results.push(result);
+    
+    return results;
+  }
+
+  private async generateIntelligenceFilesWithVerification(spec: AgentSpec, basePath: string): Promise<FileWriteResult[]> {
+    const results: FileWriteResult[] = [];
+    
+    const intelligenceFile = `${basePath}/intelligence/${spec.name}Intelligence.ts`;
+    const intelligenceContent = await this.generateIntelligenceFile(spec);
+    const result = await this.writeFileWithVerification(intelligenceFile, intelligenceContent);
+    results.push(result);
+    
+    return results;
+  }
+
+  private async generateCommunicationFilesWithVerification(spec: AgentSpec, basePath: string): Promise<FileWriteResult[]> {
+    const results: FileWriteResult[] = [];
+    
+    if (spec.discordIntegration) {
+      const discordFile = `${basePath}/communication/${spec.name}Discord.ts`;
+      const discordContent = await this.generateDiscordFile(spec);
+      const discordResult = await this.writeFileWithVerification(discordFile, discordContent);
+      results.push(discordResult);
+      
+      const voiceFile = `${basePath}/communication/${spec.name}Voice.ts`;
+      const voiceContent = await this.generateVoiceFile(spec);
+      const voiceResult = await this.writeFileWithVerification(voiceFile, voiceContent);
+      results.push(voiceResult);
+    }
+    
+    return results;
+  }
+
+  private async generateTypesFileWithVerification(spec: AgentSpec, basePath: string): Promise<FileWriteResult> {
+    const typesFile = `${basePath}/types/index.ts`;
+    const content = `export interface ${spec.name}Config {
+  ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: string;\n  ${spec.name.toLowerCase()}ChannelId: string;\n  ` : ''}claudeApiKey: string;
+}
+
+export interface ${spec.name}Request {
+  type: string;
+  description: string;
+  userId: string;
+  priority: 'low' | 'medium' | 'high';
+}
+
+export interface ${spec.name}Response {
+  success: boolean;
+  message: string;
+  data?: any;
+}`;
+
+    return await this.writeFileWithVerification(typesFile, content);
+  }
+
+  private async generateIndexFileWithVerification(spec: AgentSpec, basePath: string): Promise<FileWriteResult> {
+    const indexFile = `${basePath}/index.ts`;
+    const content = `export { ${spec.name} } from './${spec.name}.js';
+export * from './types/index.js';`;
+
+    return await this.writeFileWithVerification(indexFile, content);
+  }
+
+  private async generateWatcherFilesWithVerification(spec: AgentSpec, watcherPath: string): Promise<FileWriteResult[]> {
+    const results: FileWriteResult[] = [];
+    const watcherName = `${spec.name}Watch`;
+    
+    const mainFile = `${watcherPath}/${watcherName}.ts`;
+    const mainContent = await this.generateWatcherMainFile(spec, watcherName);
+    results.push(await this.writeFileWithVerification(mainFile, mainContent));
+    
+    const intelligenceFile = `${watcherPath}/intelligence/${watcherName}Intelligence.ts`;
+    const intelligenceContent = await this.generateWatcherIntelligenceFile(spec, watcherName);
+    results.push(await this.writeFileWithVerification(intelligenceFile, intelligenceContent));
+    
+    const coreFile = `${watcherPath}/core/${watcherName}Analyzer.ts`;
+    const coreContent = await this.generateWatcherCoreFile(spec, watcherName);
+    results.push(await this.writeFileWithVerification(coreFile, coreContent));
+    
+    const typesFile = `${watcherPath}/types/index.ts`;
+    const typesContent = await this.generateWatcherTypesFile(spec, watcherName);
+    results.push(await this.writeFileWithVerification(typesFile, typesContent));
+    
+    const indexFile = `${watcherPath}/index.ts`;
+    const indexContent = `export { ${watcherName} } from './${watcherName}.js';\nexport * from './types/index.js';`;
+    results.push(await this.writeFileWithVerification(indexFile, indexContent));
+    
+    return results;
+  }
+
+  // Memory-based agent management for Railway compatibility
+  public getStoredAgents(): AgentSpec[] {
+    return Array.from(this.agentStore.values());
+  }
+
+  public getAgentConfig(name: string): AgentSpec | undefined {
+    return this.agentStore.get(name);
+  }
+
+  // Keep all original method implementations below...
   private validateAgentSpec(spec: AgentSpec): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
     

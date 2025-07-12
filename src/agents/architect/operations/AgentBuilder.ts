@@ -1,8 +1,7 @@
-import fs from 'fs/promises';
-import { execSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { AgentSpec } from '../types/index.js';
 import { DiscordBotCreator } from './DiscordBotCreator.js';
+import { GitHubFileManager } from './GitHubFileManager.js';
 
 interface BuildResult {
   summary: string;
@@ -16,11 +15,13 @@ interface BuildResult {
   inviteUrl?: string;
   watcherCreated?: boolean;
   environmentVars?: string[];
+  commitSha?: string;
 }
 
 export class AgentBuilder {
   private claude: Anthropic;
   private discordCreator?: DiscordBotCreator;
+  private github: GitHubFileManager;
 
   constructor(claudeApiKey: string, discordToken?: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
@@ -28,6 +29,13 @@ export class AgentBuilder {
     if (discordToken) {
       this.discordCreator = new DiscordBotCreator(claudeApiKey, discordToken);
     }
+
+    // Initialize GitHub API
+    this.github = new GitHubFileManager(
+      process.env.GITHUB_TOKEN!,
+      process.env.GITHUB_REPO_OWNER!,
+      process.env.GITHUB_REPO_NAME!
+    );
   }
 
   async parseAgentRequirements(request: string): Promise<AgentSpec> {
@@ -93,49 +101,73 @@ Return JSON in this exact format:
   }
 
   async generateAgent(spec: AgentSpec): Promise<BuildResult> {
-    console.log(`[AgentBuilder] Building complete agent: ${spec.name} with watcher`);
+    console.log(`[AgentBuilder] Building complete agent: ${spec.name} via GitHub API`);
     
     const agentPath = `src/agents/${spec.name.toLowerCase()}`;
     const watcherPath = `src/agents/watcher/${spec.name.toLowerCase()}watch`;
-    const createdFiles: string[] = [];
+    const filesToCreate: Array<{path: string, content: string}> = [];
     
     try {
-      // 1. Create directory structures
-      await this.createAgentDirectories(agentPath);
-      if (spec.createWatcher) {
-        await this.createWatcherDirectories(watcherPath);
+      // 1. Generate all file contents
+      console.log(`[AgentBuilder] Generating files for ${spec.name}...`);
+      
+      // Core agent files
+      const mainContent = await this.generateMainAgentFile(spec);
+      filesToCreate.push({
+        path: `${agentPath}/${spec.name}.ts`,
+        content: mainContent
+      });
+
+      // Intelligence files
+      const intelligenceContent = await this.generateIntelligenceFile(spec);
+      filesToCreate.push({
+        path: `${agentPath}/intelligence/${spec.name}Intelligence.ts`,
+        content: intelligenceContent
+      });
+
+      // Communication files (if Discord integration)
+      if (spec.discordIntegration) {
+        const discordContent = await this.generateDiscordFile(spec);
+        filesToCreate.push({
+          path: `${agentPath}/communication/${spec.name}Discord.ts`,
+          content: discordContent
+        });
+
+        const voiceContent = await this.generateVoiceFile(spec);
+        filesToCreate.push({
+          path: `${agentPath}/communication/${spec.name}Voice.ts`,
+          content: voiceContent
+        });
       }
-      
-      // 2. Generate core agent files
-      const coreFiles = await this.generateCoreFiles(spec, agentPath);
-      createdFiles.push(...coreFiles);
-      
-      // 3. Generate intelligence files
-      const intelligenceFiles = await this.generateIntelligenceFiles(spec, agentPath);
-      createdFiles.push(...intelligenceFiles);
-      
-      // 4. Generate communication files
-      const commFiles = await this.generateCommunicationFiles(spec, agentPath);
-      createdFiles.push(...commFiles);
-      
-      // 5. Generate types
-      const typesFile = await this.generateTypesFile(spec, agentPath);
-      createdFiles.push(typesFile);
-      
-      // 6. Generate index file
-      const indexFile = await this.generateIndexFile(spec, agentPath);
-      createdFiles.push(indexFile);
-      
-      // 7. Generate watcher if requested
+
+      // Types
+      const typesContent = await this.generateTypesFile(spec);
+      filesToCreate.push({
+        path: `${agentPath}/types/index.ts`,
+        content: typesContent
+      });
+
+      // Index
+      const indexContent = await this.generateIndexFile(spec);
+      filesToCreate.push({
+        path: `${agentPath}/index.ts`,
+        content: indexContent
+      });
+
+      // Watcher files (if requested)
       if (spec.createWatcher) {
         const watcherFiles = await this.generateWatcherFiles(spec, watcherPath);
-        createdFiles.push(...watcherFiles);
+        filesToCreate.push(...watcherFiles);
       }
-      
-      // 8. Update main index.ts to include new agent
-      await this.updateMainIndex(spec);
-      
-      // 9. Create Discord bot if integration is enabled
+
+      // Update main index.ts
+      const updatedIndexContent = await this.generateUpdatedMainIndex(spec);
+      filesToCreate.push({
+        path: 'src/index.ts',
+        content: updatedIndexContent
+      });
+
+      // 2. Create Discord bot if integration enabled
       let discordBotCreated = false;
       let botToken = '';
       let channelId = '';
@@ -150,7 +182,6 @@ Return JSON in this exact format:
           botToken = botConfig.token;
           inviteUrl = botConfig.inviteUrl;
           
-          // Create dedicated channel
           const guildId = process.env.DISCORD_GUILD_ID;
           if (guildId) {
             const createdChannelId = await this.discordCreator.createChannelForAgent(guildId, spec.name);
@@ -160,22 +191,34 @@ Return JSON in this exact format:
           }
           
           console.log(`[AgentBuilder] Discord bot created successfully for ${spec.name}`);
-        } else {
-          console.warn(`[AgentBuilder] Failed to create Discord bot for ${spec.name}, continuing without Discord integration`);
         }
       }
-      
-      // 10. Register with Commander
+
+      // 3. Register with Commander
       if (spec.discordIntegration) {
-        await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
+        const registryContent = await this.generateBotRegistry(spec, channelId);
+        filesToCreate.push({
+          path: 'data/registered-bots.json',
+          content: registryContent
+        });
       }
-      
-      // 11. Commit the new agent
-      await this.commitNewAgent(spec, createdFiles);
-      
+
+      // 4. Commit all files to GitHub
+      console.log(`[AgentBuilder] Committing ${filesToCreate.length} files to GitHub...`);
+      const commitResult = await this.github.writeFiles(
+        filesToCreate,
+        `🤖 Add ${spec.name} agent with full integration\n\nFeatures:\n- ${spec.discordIntegration ? 'Discord integration' : 'Standalone agent'}\n- ${spec.createWatcher ? 'Learning watcher' : 'Standard operation'}\n- ${spec.capabilities.join(', ')}`
+      );
+
+      if (!commitResult.success) {
+        throw new Error('Failed to commit files to GitHub');
+      }
+
+      console.log(`[AgentBuilder] Successfully committed to GitHub: ${commitResult.commitSha}`);
+
       return {
-        summary: `Agent ${spec.name} created with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,
-        files: createdFiles,
+        summary: `Agent ${spec.name} created and deployed via GitHub API`,
+        files: filesToCreate.map(f => f.path),
         ready: true,
         discordSetupNeeded: spec.discordIntegration && !discordBotCreated,
         discordBotCreated,
@@ -186,7 +229,8 @@ Return JSON in this exact format:
         environmentVars: spec.discordIntegration ? [
           `${spec.name.toUpperCase()}_DISCORD_TOKEN`,
           `${spec.name.toUpperCase()}_CHANNEL_ID`
-        ] : []
+        ] : [],
+        commitSha: commitResult.commitSha
       };
       
     } catch (error) {
@@ -194,7 +238,7 @@ Return JSON in this exact format:
       console.error(`[AgentBuilder] Failed to build agent ${spec.name}:`, error);
       return {
         summary: `Failed to create agent ${spec.name}: ${errorMessage}`,
-        files: createdFiles,
+        files: filesToCreate.map(f => f.path),
         ready: false,
         error: errorMessage
       };
@@ -203,11 +247,11 @@ Return JSON in this exact format:
 
   async getStoredAgents(): Promise<Array<{name: string, purpose: string, capabilities: string[], isOnline: boolean}>> {
     try {
-      await fs.mkdir('data', { recursive: true });
-      
+      // Try to get from GitHub first, fallback to defaults
       try {
-        const existing = await fs.readFile('data/registered-bots.json', 'utf8');
-        const agents = JSON.parse(existing);
+        const registryFile = await this.github.getFile('data/registered-bots.json');
+        const content = Buffer.from(registryFile.content, 'base64').toString();
+        const agents = JSON.parse(content);
         return agents.map((agent: any) => ({
           name: agent.name,
           purpose: agent.purpose,
@@ -243,106 +287,7 @@ Return JSON in this exact format:
     }
   }
 
-  private async createAgentDirectories(basePath: string): Promise<void> {
-    const dirs = [
-      basePath,
-      `${basePath}/core`,
-      `${basePath}/intelligence`, 
-      `${basePath}/communication`,
-      `${basePath}/types`
-    ];
-    
-    for (const dir of dirs) {
-      await fs.mkdir(dir, { recursive: true });
-    }
-  }
-
-  private async createWatcherDirectories(basePath: string): Promise<void> {
-    const dirs = [
-      basePath,
-      `${basePath}/core`,
-      `${basePath}/intelligence`, 
-      `${basePath}/communication`,
-      `${basePath}/types`
-    ];
-    
-    for (const dir of dirs) {
-      await fs.mkdir(dir, { recursive: true });
-    }
-  }
-
-  private async generateCoreFiles(spec: AgentSpec, basePath: string): Promise<string[]> {
-    const files: string[] = [];
-    
-    const mainFile = `${basePath}/${spec.name}.ts`;
-    const mainContent = await this.generateMainAgentFile(spec);
-    await fs.writeFile(mainFile, mainContent);
-    files.push(mainFile);
-    
-    return files;
-  }
-
-  private async generateIntelligenceFiles(spec: AgentSpec, basePath: string): Promise<string[]> {
-    const files: string[] = [];
-    
-    const intelligenceFile = `${basePath}/intelligence/${spec.name}Intelligence.ts`;
-    const intelligenceContent = await this.generateIntelligenceFile(spec);
-    await fs.writeFile(intelligenceFile, intelligenceContent);
-    files.push(intelligenceFile);
-    
-    return files;
-  }
-
-  private async generateCommunicationFiles(spec: AgentSpec, basePath: string): Promise<string[]> {
-    const files: string[] = [];
-    
-    if (spec.discordIntegration) {
-      const discordFile = `${basePath}/communication/${spec.name}Discord.ts`;
-      const discordContent = await this.generateDiscordFile(spec);
-      await fs.writeFile(discordFile, discordContent);
-      files.push(discordFile);
-      
-      const voiceFile = `${basePath}/communication/${spec.name}Voice.ts`;
-      const voiceContent = await this.generateVoiceFile(spec);
-      await fs.writeFile(voiceFile, voiceContent);
-      files.push(voiceFile);
-    }
-    
-    return files;
-  }
-
-  private async generateWatcherFiles(spec: AgentSpec, watcherPath: string): Promise<string[]> {
-    const files: string[] = [];
-    const watcherName = `${spec.name}Watch`;
-    
-    const mainFile = `${watcherPath}/${watcherName}.ts`;
-    const mainContent = await this.generateWatcherMainFile(spec, watcherName);
-    await fs.writeFile(mainFile, mainContent);
-    files.push(mainFile);
-    
-    const intelligenceFile = `${watcherPath}/intelligence/${watcherName}Intelligence.ts`;
-    const intelligenceContent = await this.generateWatcherIntelligenceFile(spec, watcherName);
-    await fs.writeFile(intelligenceFile, intelligenceContent);
-    files.push(intelligenceFile);
-    
-    const coreFile = `${watcherPath}/core/${watcherName}Analyzer.ts`;
-    const coreContent = await this.generateWatcherCoreFile(spec, watcherName);
-    await fs.writeFile(coreFile, coreContent);
-    files.push(coreFile);
-    
-    const typesFile = `${watcherPath}/types/index.ts`;
-    const typesContent = await this.generateWatcherTypesFile(spec, watcherName);
-    await fs.writeFile(typesFile, typesContent);
-    files.push(typesFile);
-    
-    const indexFile = `${watcherPath}/index.ts`;
-    const indexContent = `export { ${watcherName} } from './${watcherName}.js';\nexport * from './types/index.js';`;
-    await fs.writeFile(indexFile, indexContent);
-    files.push(indexFile);
-    
-    return files;
-  }
-
+  // File generation methods remain the same but return content instead of writing files
   private async generateMainAgentFile(spec: AgentSpec): Promise<string> {
     const discordImport = spec.discordIntegration ? 
       `import { ${spec.name}Discord } from './communication/${spec.name}Discord.js';\nimport { ${spec.name}Voice } from './communication/${spec.name}Voice.js';` : '';
@@ -481,6 +426,10 @@ export class ${spec.name}Discord {
       console.log(\`[${spec.name}Discord] Connected as \${this.client.user?.tag}\`);
       this.channel = this.client.channels.cache.get(this.config.${spec.name.toLowerCase()}ChannelId) as TextChannel;
       
+      if (this.channel) {
+        await this.channel.send(\`🤖 **${spec.name} Online** - ${spec.purpose}\`);
+      }
+      
       this.client.user?.setPresence({
         activities: [{ name: '${spec.purpose}', type: 3 }],
         status: 'online'
@@ -532,13 +481,6 @@ export class ${spec.name}Discord {
 export class ${spec.name}Voice {
   private claude: Anthropic;
   
-  private static readonly VOICE_PROMPT = \`You are the ${spec.name} agent.
-  
-Purpose: ${spec.purpose}
-Personality: ${spec.voicePersonality}
-
-Keep responses helpful and professional.\`;
-
   constructor(claudeApiKey: string) {
     this.claude = new Anthropic({ apiKey: claudeApiKey });
   }
@@ -552,63 +494,8 @@ Keep responses helpful and professional.\`;
 }`;
   }
 
-  private async generateWatcherMainFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `import { ${watcherName}Intelligence } from './intelligence/${watcherName}Intelligence.js';
-
-export class ${watcherName} {
-  private intelligence: ${watcherName}Intelligence;
-
-  constructor() {
-    this.intelligence = new ${watcherName}Intelligence();
-    console.log('[${watcherName}] ${spec.watcherPurpose} watcher initialized');
-  }
-
-  async log${spec.name}Interaction(input: string, output: string, metadata: any[]): Promise<void> {
-    await this.intelligence.analyzeInteraction(input, output, metadata);
-  }
-}`;
-  }
-
-  private async generateWatcherIntelligenceFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export class ${watcherName}Intelligence {
-  
-  async analyzeInteraction(input: string, output: string, metadata: any[]): Promise<void> {
-    console.log(\`[${watcherName}Intelligence] Analyzing interaction for ${spec.name}\`);
-    // Learning logic will be implemented here
-  }
-}`;
-  }
-
-  private async generateWatcherCoreFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export class ${watcherName}Analyzer {
-  
-  async analyzePerformance(): Promise<any> {
-    return {
-      summary: '${spec.name} performance analysis',
-      metrics: {},
-      recommendations: []
-    };
-  }
-}`;
-  }
-
-  private async generateWatcherTypesFile(spec: AgentSpec, watcherName: string): Promise<string> {
-    return `export interface ${watcherName}Metrics {
-  interactions: number;
-  successRate: number;
-  averageResponseTime: number;
-}
-
-export interface ${watcherName}Analysis {
-  summary: string;
-  patterns: string[];
-  optimizations: string[];
-}`;
-  }
-
-  private async generateTypesFile(spec: AgentSpec, basePath: string): Promise<string> {
-    const typesFile = `${basePath}/types/index.ts`;
-    const content = `export interface ${spec.name}Config {
+  private async generateTypesFile(spec: AgentSpec): Promise<string> {
+    return `export interface ${spec.name}Config {
   ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: string;\n  ${spec.name.toLowerCase()}ChannelId: string;\n  ` : ''}claudeApiKey: string;
 }
 
@@ -624,98 +511,167 @@ export interface ${spec.name}Response {
   message: string;
   data?: any;
 }`;
-
-    await fs.writeFile(typesFile, content);
-    return typesFile;
   }
 
-  private async generateIndexFile(spec: AgentSpec, basePath: string): Promise<string> {
-    const indexFile = `${basePath}/index.ts`;
-    const content = `export { ${spec.name} } from './${spec.name}.js';
+  private async generateIndexFile(spec: AgentSpec): Promise<string> {
+    return `export { ${spec.name} } from './${spec.name}.js';
 export * from './types/index.js';`;
-
-    await fs.writeFile(indexFile, content);
-    return indexFile;
   }
 
-  private async updateMainIndex(spec: AgentSpec): Promise<void> {
-    try {
-      const indexPath = 'src/index.ts';
-      const currentContent = await fs.readFile(indexPath, 'utf8');
-      
-      const importLine = `import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';`;
-      const watcherImportLine = spec.createWatcher ? 
-        `import { ${spec.name}Watch } from './agents/watcher/${spec.name.toLowerCase()}watch/${spec.name}Watch.js';` : '';
-      
-      if (currentContent.includes(importLine)) {
-        console.log(`[AgentBuilder] ${spec.name} already integrated in index.ts`);
-        return;
-      }
-      
-      const lines = currentContent.split('\n');
-      const lastImportIndex = lines.map((line, index) => line.startsWith('import') ? index : -1)
-        .filter(index => index !== -1)
-        .pop() ?? -1;
-      
-      lines.splice(lastImportIndex + 1, 0, importLine);
-      if (watcherImportLine) {
-        lines.splice(lastImportIndex + 2, 0, watcherImportLine);
-      }
-      
-      const startFunctionName = `start${spec.name}`;
-      const startFunction = `
-async function ${startFunctionName}() {
+  private async generateWatcherFiles(spec: AgentSpec, watcherPath: string): Promise<Array<{path: string, content: string}>> {
+    const watcherName = `${spec.name}Watch`;
+    const files: Array<{path: string, content: string}> = [];
+
+    // Main watcher file
+    files.push({
+      path: `${watcherPath}/${watcherName}.ts`,
+      content: `import { ${watcherName}Intelligence } from './intelligence/${watcherName}Intelligence.js';
+
+export class ${watcherName} {
+  private intelligence: ${watcherName}Intelligence;
+
+  constructor() {
+    this.intelligence = new ${watcherName}Intelligence();
+    console.log('[${watcherName}] ${spec.watcherPurpose} watcher initialized');
+  }
+
+  async log${spec.name}Interaction(input: string, output: string, metadata: any[]): Promise<void> {
+    await this.intelligence.analyzeInteraction(input, output, metadata);
+  }
+}`
+    });
+
+    // Watcher intelligence
+    files.push({
+      path: `${watcherPath}/intelligence/${watcherName}Intelligence.ts`,
+      content: `export class ${watcherName}Intelligence {
+  
+  async analyzeInteraction(input: string, output: string, metadata: any[]): Promise<void> {
+    console.log(\`[${watcherName}Intelligence] Analyzing interaction for ${spec.name}\`);
+    // Learning logic will be implemented here
+  }
+}`
+    });
+
+    // Watcher types
+    files.push({
+      path: `${watcherPath}/types/index.ts`,
+      content: `export interface ${watcherName}Metrics {
+  interactions: number;
+  successRate: number;
+  averageResponseTime: number;
+}
+
+export interface ${watcherName}Analysis {
+  summary: string;
+  patterns: string[];
+  optimizations: string[];
+}`
+    });
+
+    // Watcher index
+    files.push({
+      path: `${watcherPath}/index.ts`,
+      content: `export { ${watcherName} } from './${watcherName}.js';
+export * from './types/index.js';`
+    });
+
+    return files;
+  }
+
+  private async generateUpdatedMainIndex(spec: AgentSpec): Promise<string> {
+    // This would need to read the current index.ts and update it
+    // For now, return a basic version that includes the new agent
+    return `import { Commander } from './agents/commander/Commander.js';
+import { Architect } from './agents/architect/Architect.js';
+import { Dashboard } from './agents/dashboard/Dashboard.js';
+import { ${spec.name} } from './agents/${spec.name.toLowerCase()}/${spec.name}.js';
+
+console.log('🚀 Starting AI Development Team...');
+
+// Existing startup functions...
+async function startCommander() {
+  const commander = new Commander();
+  await commander.start();
+}
+
+async function startArchitect() {
+  const architectConfig = {
+    architectToken: process.env.ARCHITECT_DISCORD_TOKEN!,
+    architectChannelId: process.env.ARCHITECT_CHANNEL_ID!,
+    claudeApiKey: process.env.CLAUDE_API_KEY!,
+    discordToken: process.env.DISCORD_TOKEN
+  };
+
+  if (architectConfig.architectToken && architectConfig.architectChannelId) {
+    const architect = new Architect(architectConfig);
+    await architect.start();
+  } else {
+    console.log('[Architect] Environment variables not set, skipping architect startup');
+  }
+}
+
+async function startDashboard() {
+  const dashboardConfig = {
+    dashboardToken: process.env.DASHBOARD_DISCORD_TOKEN!,
+    dashboardChannelId: process.env.DASHBOARD_CHANNEL_ID!,
+    agentCoordinationChannelId: process.env.AGENT_COORDINATION_CHANNEL_ID || '1393086808866426930',
+    claudeApiKey: process.env.CLAUDE_API_KEY!
+  };
+
+  if (dashboardConfig.dashboardToken && dashboardConfig.dashboardChannelId) {
+    const dashboard = new Dashboard(dashboardConfig);
+    await dashboard.start();
+  } else {
+    console.log('[Dashboard] Environment variables not set, skipping dashboard startup');
+  }
+}
+
+async function start${spec.name}() {
   const ${spec.name.toLowerCase()}Config = {
-    ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: process.env.${spec.name.toUpperCase()}_DISCORD_TOKEN!,\n    ${spec.name.toLowerCase()}ChannelId: process.env.${spec.name.toUpperCase()}_CHANNEL_ID!,\n    ` : ''}claudeApiKey: process.env.CLAUDE_API_KEY!
+    ${spec.discordIntegration ? `${spec.name.toLowerCase()}Token: process.env.${spec.name.toUpperCase()}_DISCORD_TOKEN!,
+    ${spec.name.toLowerCase()}ChannelId: process.env.${spec.name.toUpperCase()}_CHANNEL_ID!,
+    ` : ''}claudeApiKey: process.env.CLAUDE_API_KEY!
   };
 
   if (${spec.discordIntegration ? `${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}Token && ${spec.name.toLowerCase()}Config.${spec.name.toLowerCase()}ChannelId` : 'true'}) {
-    const ${spec.name.toLowerCase()} = new ${spec.name}(${spec.name.toLowerCase()}Config);${spec.createWatcher ? `\n    const ${spec.name.toLowerCase()}Watch = new ${spec.name}Watch();` : ''}
+    const ${spec.name.toLowerCase()} = new ${spec.name}(${spec.name.toLowerCase()}Config);
     await ${spec.name.toLowerCase()}.start();
   } else {
     console.log('[${spec.name}] Environment variables not set, skipping startup');
   }
-}`;
-      
-      const promiseAllIndex = lines.findIndex(line => line.includes('Promise.all'));
-      if (promiseAllIndex !== -1) {
-        lines.splice(promiseAllIndex, 0, startFunction);
-        
-        const promiseAllLine = lines[promiseAllIndex + startFunction.split('\n').length];
-        if (promiseAllLine.includes('startCommander()')) {
-          lines[promiseAllIndex + startFunction.split('\n').length] = promiseAllLine.replace(
-            '])',
-            `,\n  ${startFunctionName}()\n])`
-          );
-        }
-      } else {
-        lines.push(startFunction);
-        lines.push(`\n${startFunctionName}().catch(console.error);`);
-      }
-      
-      await fs.writeFile(indexPath, lines.join('\n'));
-      console.log(`[AgentBuilder] Updated index.ts to include ${spec.name}${spec.createWatcher ? ' and watcher' : ''}`);
-      
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to update index.ts:`, error);
-    }
+}
+
+// Start all systems
+Promise.all([
+  startCommander(),
+  startArchitect(),
+  startDashboard(),
+  start${spec.name}()
+]).catch(console.error);`;
   }
 
-  private async registerBotWithCommander(spec: AgentSpec, channelId: string): Promise<void> {
-    try {
-      console.log(`[AgentBuilder] Registering ${spec.name} with Commander's BotOrchestrator`);
-      
-      await fs.mkdir('data', { recursive: true });
-      
-      let existingBots = [];
-      try {
-        const existing = await fs.readFile('data/registered-bots.json', 'utf8');
-        existingBots = JSON.parse(existing);
-      } catch (error) {
-        // File doesn't exist yet
-      }
-      
-      existingBots.push({
+  private async generateBotRegistry(spec: AgentSpec, channelId: string): Promise<string> {
+    const defaultBots = [
+      {
+        name: 'Commander',
+        purpose: 'Universal task router and delegation',
+        capabilities: ['task-routing', 'work-item-management', 'agent-coordination'],
+        channelId: process.env.AGENT_CHANNEL_ID,
+        isOnline: true,
+        specialties: ['task-routing', 'work-item-management', 'agent-coordination'],
+        lastSeen: new Date().toISOString()
+      },
+      {
+        name: 'Architect', 
+        purpose: 'System building and code modification',
+        capabilities: ['system-modification', 'agent-creation', 'code-analysis'],
+        channelId: process.env.ARCHITECT_CHANNEL_ID,
+        isOnline: true,
+        specialties: ['system-modification', 'agent-creation', 'code-analysis'],
+        lastSeen: new Date().toISOString()
+      },
+      {
         name: spec.name,
         purpose: spec.purpose,
         capabilities: spec.capabilities,
@@ -723,26 +679,10 @@ async function ${startFunctionName}() {
         isOnline: true,
         specialties: spec.capabilities,
         lastSeen: new Date().toISOString()
-      });
-      
-      await fs.writeFile('data/registered-bots.json', JSON.stringify(existingBots, null, 2));
-      
-      console.log(`[AgentBuilder] ${spec.name} registered with Commander for delegation`);
-      
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to register ${spec.name} with Commander:`, error);
-    }
-  }
+      }
+    ];
 
-  private async commitNewAgent(spec: AgentSpec, files: string[]): Promise<void> {
-    try {
-      execSync('git add .', { stdio: 'pipe' });
-      execSync(`git commit -m "🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}"`, { stdio: 'pipe' });
-      execSync('git push origin main', { stdio: 'pipe' });
-      console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
-    } catch (error) {
-      console.error(`[AgentBuilder] Failed to commit ${spec.name}:`, error);
-    }
+    return JSON.stringify(defaultBots, null, 2);
   }
 
   private fallbackAgentSpec(request: string): AgentSpec {

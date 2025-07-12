@@ -1,8 +1,8 @@
-import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
-import { LiveDeploymentTracker } from '../operations/LiveDeploymentTracker.js';
-import { ArchitectVoice } from '../communication/ArchitectVoice.js';
-import { ArchitectDiscord } from '../communication/ArchitectDiscord.js';
-import { Message } from 'discord.js';
+import { ArchitecturalRequest, ArchitectConfig } from ‘../types/index.js’;
+import { LiveDeploymentTracker } from ‘../operations/LiveDeploymentTracker.js’;
+import { ArchitectVoice } from ‘../communication/ArchitectVoice.js’;
+import { ArchitectDiscord } from ‘../communication/ArchitectDiscord.js’;
+import { Message } from ‘discord.js’;
 
 export class ArchitectOrchestrator {
 private liveDeployer: LiveDeploymentTracker;
@@ -22,16 +22,16 @@ console.log(`[ArchitectOrchestrator] Starting live tracked deployment: ${request
 ```
 try {
   // Send ONE initial progress message that we'll keep updating
-  const initialProgressMessage = `🚀 **Starting Agent Deployment**
+  const initialProgressMessage = `**LAUNCH** **Starting Agent Deployment**
 ```
 
-⏳ Initializing deployment pipeline…
+Initializing deployment pipeline…
 
-📊 **Progress**
+**Progress**
 ░░░░░░░░░░░░░░░░░░░░ 0%
 
 **Current Step:** Parsing Requirements
-**Status:** ⏳ Starting
+**Status:** Starting
 **Elapsed:** 0s
 **ETA:** Calculating…
 
@@ -66,19 +66,19 @@ try {
     
     // Send a separate completion summary message
     return await this.voice.formatResponse(
-      `🎉 **Agent Deployment Complete!**
+      `**SUCCESS** **Agent Deployment Complete!**
 ```
 
-✅ **${deploymentResult.summary}**
+**${deploymentResult.summary}**
 
-🚀 **Quick Access:**
+**Quick Access:**
 
 - **Agent URL:** ${deploymentResult.agentUrl}
-- **Discord Bot:** ${deploymentResult.discordSetup?.inviteUrl || 'N/A'}
+- **Discord Bot:** ${deploymentResult.discordSetup?.inviteUrl || ‘N/A’}
 - **Total Time:** ${deploymentResult.actualDeploymentTime}
 
 Your agent is live and ready to use!`,
-{ type: 'creation' }
+{ type: ‘creation’ }
 );
 
 ```
@@ -87,14 +87,14 @@ Your agent is live and ready to use!`,
     await this.finalizeProgressMessage(deploymentId!, deploymentResult);
     
     return await this.voice.formatResponse(
-      `❌ **Deployment Failed**
+      `**ERROR** **Deployment Failed**
 ```
 
 **Error:** ${deploymentResult.error}
 **Failed At:** ${deploymentResult.failedAt}
 
 You can retry the deployment - all progress has been cleaned up.`,
-{ type: 'error' }
+{ type: ‘error’ }
 );
 }
 
@@ -123,14 +123,14 @@ if (!message) return;
   const currentStep = progress.steps[progress.currentStep];
   const progressBar = this.generateProgressBar(progress.overallProgress, 20);
   
-  const updatedContent = `🚀 **Deploying ${progress.agentName}**
+  const updatedContent = `**LAUNCH** **Deploying ${progress.agentName}**
 ```
 
-📊 **Progress**
+**Progress**
 ${progressBar} ${progress.overallProgress.toFixed(1)}%
 
-**Current Step:** ${currentStep?.name || 'Unknown'}
-**Status:** ${this.getStatusEmoji(currentStep?.status)} ${currentStep?.status || 'Unknown'}
+**Current Step:** ${currentStep?.name || ‘Unknown’}
+**Status:** ${this.getStatusEmoji(currentStep?.status)} ${currentStep?.status || ‘Unknown’}
 **Elapsed:** ${this.formatDuration(elapsed)}
 **ETA:** ${eta}
 
@@ -161,40 +161,40 @@ if (!message) return;
   let finalContent: string;
   
   if (result.success) {
-    finalContent = `✅ **Agent Deployment Complete!**
+    finalContent = `**SUCCESS** **Agent Deployment Complete!**
 ```
 
-🎉 **${result.summary}**
+**${result.summary}**
 
-📊 **Final Results**
+**Final Results**
 ████████████████████ 100%
 
 **Total Time:** ${result.actualDeploymentTime}
-**Status:** ✅ Successfully Deployed
+**Status:** Successfully Deployed
 **PR:** #${result.prNumber} (merged)
 **Agent URL:** ${result.agentUrl}
 
 **Performance Breakdown:**
-${result.timingBreakdown?.slice(0, 5).map((t: any) => `${this.getStatusEmoji(t.status)} ${t.step}: ${t.duration}`).join('\n')}
+${result.timingBreakdown?.slice(0, 5).map((t: any) => `${this.getStatusEmoji(t.status)} ${t.step}: ${t.duration}`).join(’\n’)}
 
 -----
 
-✅ **Deployment Complete** • ID: ${deploymentId}`; } else { finalContent = `❌ **Deployment Failed**
+**Deployment Complete** • ID: ${deploymentId}`; } else { finalContent = `**ERROR** **Deployment Failed**
 
-💥 **Error:** ${result.error}
+**Error:** ${result.error}
 
-📊 **Progress Before Failure**
+**Progress Before Failure**
 ${this.generateProgressBar(result.progress || 0, 20)} ${(result.progress || 0).toFixed(1)}%
 
 **Failed At:** ${result.failedAt}
-**Status:** ❌ Deployment Failed
+**Status:** Deployment Failed
 
 **Steps Completed:**
-${result.timingBreakdown?.filter((t: any) => t.status === 'completed').map((t: any) => `✅ ${t.step}: ${t.duration}`).join('\n') || 'None'}
+${result.timingBreakdown?.filter((t: any) => t.status === ‘completed’).map((t: any) => `[DONE] ${t.step}: ${t.duration}`).join(’\n’) || ‘None’}
 
 -----
 
-❌ **Deployment Failed** • ID: ${deploymentId}`;
+**Deployment Failed** • ID: ${deploymentId}`;
 }
 
 ```
@@ -213,7 +213,7 @@ ${result.timingBreakdown?.filter((t: any) => t.status === 'completed').map((t: a
 private generateProgressBar(progress: number, length: number = 20): string {
 const filled = Math.round((progress / 100) * length);
 const empty = length - filled;
-return '█'.repeat(filled) + '░'.repeat(empty);
+return ‘█’.repeat(filled) + ‘░’.repeat(empty);
 }
 
 private generateStepList(progress: any): string {
@@ -242,11 +242,11 @@ return stepList.trim();
 
 private getStatusEmoji(status?: string): string {
 switch (status) {
-case 'completed': return '✅';
-case 'running': return '⏳';
-case 'failed': return '❌';
-case 'pending': return '⏸️';
-default: return '❓';
+case ‘completed’: return ‘[DONE]’;
+case ‘running’: return ‘[RUNNING]’;
+case ‘failed’: return ‘[FAILED]’;
+case ‘pending’: return ‘[PENDING]’;
+default: return ‘[UNKNOWN]’;
 }
 }
 
@@ -261,7 +261,7 @@ private async editProgressMessage(messageId: string, content: string): Promise<v
 try {
 await this.discord.editMessage(messageId, content);
 } catch (error) {
-console.error('[ArchitectOrchestrator] Failed to edit message:', error);
+console.error(’[ArchitectOrchestrator] Failed to edit message:’, error);
 }
 }
 }

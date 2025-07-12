@@ -1,5 +1,5 @@
-import { Client, GatewayIntentBits, TextChannel, EmbedBuilder, Message } from ‘discord.js’;
-import { ArchitectConfig } from ‘../types/index.js’;
+import { Client, GatewayIntentBits, TextChannel, EmbedBuilder, Message } from 'discord.js';
+import { ArchitectConfig } from '../types/index.js';
 
 export class ArchitectDiscord {
 private client: Client;
@@ -17,18 +17,15 @@ GatewayIntentBits.MessageContent
 ]
 });
 
-```
 this.setupEventHandlers();
-```
 
 }
 
 private setupEventHandlers(): void {
-this.client.once(‘ready’, async () => {
+this.client.once('ready', async () => {
 console.log(`[ArchitectDiscord] Connected as ${this.client.user?.tag}`);
 this.architectChannel = this.client.channels.cache.get(this.config.architectChannelId) as TextChannel;
 
-```
   this.client.user?.setPresence({
     activities: [{ name: 'Building Systems', type: 3 }],
     status: 'online'
@@ -47,7 +44,6 @@ this.client.on('messageCreate', async (message) => {
 this.client.on('error', (error) => {
   console.error('[ArchitectDiscord] Client error:', error);
 });
-```
 
 }
 
@@ -57,11 +53,10 @@ this.messageHandlers.push(handler);
 
 async sendMessage(content: string): Promise<Message | null> {
 if (!this.architectChannel) {
-console.error(’[ArchitectDiscord] Channel not available’);
+console.error('[ArchitectDiscord] Channel not available');
 return null;
 }
 
-```
 try {
   const message = await this.architectChannel.send(content);
   console.log(`[ArchitectDiscord] Sent message: ${message.id}`);
@@ -70,7 +65,6 @@ try {
   console.error('[ArchitectDiscord] Failed to send message:', error);
   return null;
 }
-```
 
 }
 
@@ -78,7 +72,6 @@ async editMessage(messageOrId: Message | string, newContent: string): Promise<Me
 try {
 let message: Message;
 
-```
   if (typeof messageOrId === 'string') {
     if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for message editing');
@@ -97,7 +90,6 @@ let message: Message;
   console.error('[ArchitectDiscord] Failed to edit message:', error);
   return null;
 }
-```
 
 }
 
@@ -105,7 +97,6 @@ async deleteMessage(messageOrId: Message | string): Promise<boolean> {
 try {
 let message: Message;
 
-```
   if (typeof messageOrId === 'string') {
     if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for message deletion');
@@ -124,7 +115,6 @@ let message: Message;
   console.error('[ArchitectDiscord] Failed to delete message:', error);
   return false;
 }
-```
 
 }
 
@@ -132,7 +122,6 @@ async addReaction(messageOrId: Message | string, emoji: string): Promise<boolean
 try {
 let message: Message;
 
-```
   if (typeof messageOrId === 'string') {
     if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for reaction');
@@ -151,14 +140,12 @@ let message: Message;
   console.error('[ArchitectDiscord] Failed to add reaction:', error);
   return false;
 }
-```
 
 }
 
 async sendEmbed(title: string, description: string, color: number = 0x3498db): Promise<Message | null> {
 if (!this.architectChannel) return null;
 
-```
 const embed = new EmbedBuilder()
   .setTitle(title)
   .setDescription(description)
@@ -171,7 +158,6 @@ try {
   console.error('[ArchitectDiscord] Failed to send embed:', error);
   return null;
 }
-```
 
 }
 
@@ -198,7 +184,7 @@ try {
 if (!this.architectChannel) return null;
 return await this.architectChannel.messages.fetch(messageId);
 } catch (error) {
-console.error(’[ArchitectDiscord] Failed to fetch message:’, error);
+console.error('[ArchitectDiscord] Failed to fetch message:', error);
 return null;
 }
 }

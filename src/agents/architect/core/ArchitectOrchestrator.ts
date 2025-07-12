@@ -18,6 +18,7 @@ export class ArchitectOrchestrator {
   // Add state management for pending operations
   private pendingModifications: Map<string, any> = new Map();
   private lastResponse: Map<string, string> = new Map();
+  private agentBuilder: ArchitectOrchestrator;
 
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
@@ -25,6 +26,7 @@ export class ArchitectOrchestrator {
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.intelligence = new CodeIntelligence(config.claudeApiKey);
+    this.agentBuilder = new ArchitectOrchestrator(config);
     
     if (config.discordToken) {
       this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.discordToken);
@@ -154,7 +156,7 @@ Health: ${analysis.healthScore}%`;
     
     try {
       // Use the fixed AgentBuilder
-      const success = await agentBuilder.buildCompleteAgent(request.description);
+      const success = await this.agentBuilder.buildCompleteAgent(request.description);
       
       if (success) {
         const config = agentBuilder.parseRequirements(request.description);
@@ -201,7 +203,7 @@ Health: ${analysis.healthScore}%`;
 
   private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
     const status = await this.codeAnalyzer.getSystemHealth();
-    const agents = agentBuilder.getStoredAgents();
+    const agents = this.agentBuilder.getStoredAgents();
     
     const agentStatus = agents.length > 0 ? 
       ` Active agents: ${agents.length} (${agents.map(a => a.name).join(', ')}).` : 

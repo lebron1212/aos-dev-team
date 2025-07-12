@@ -21,7 +21,7 @@ console.log(`[ArchitectOrchestrator] Starting live tracked deployment: ${request
 
 ```
 try {
-  // Send ONE initial progress message that we'll keep updating
+  // Send ONE initial progress message that we"ll keep updating
   const initialProgressMessage = `**LAUNCH** **Starting Agent Deployment**
 ```
 
@@ -100,10 +100,10 @@ You can retry the deployment - all progress has been cleaned up.`,
 
 ```
 } catch (error) {
-  console.error('[ArchitectOrchestrator] Agent creation failed:', error);
+  console.error("[ArchitectOrchestrator] Agent creation failed:", error);
   return await this.voice.formatResponse(
     `Agent creation failed: ${error instanceof Error ? error.message : String(error)}`, 
-    { type: 'error' }
+    { type: "error" }
   );
 }
 ```
@@ -118,7 +118,7 @@ if (!message) return;
 ```
   const elapsed = Date.now() - progress.startTime;
   const eta = progress.estimatedCompletion ? 
-    this.formatDuration(Math.max(0, progress.estimatedCompletion - Date.now())) : 'Calculating...';
+    this.formatDuration(Math.max(0, progress.estimatedCompletion - Date.now())) : "Calculating...";
   
   const currentStep = progress.steps[progress.currentStep];
   const progressBar = this.generateProgressBar(progress.overallProgress, 20);
@@ -146,7 +146,7 @@ ${this.generateStepList(progress)}
   await message.edit(updatedContent);
   
 } catch (error) {
-  console.error('[ArchitectOrchestrator] Failed to update progress message:', error);
+  console.error("[ArchitectOrchestrator] Failed to update progress message:", error);
 }
 ```
 
@@ -204,7 +204,7 @@ ${result.timingBreakdown?.filter((t: any) => t.status === ‘completed’).map((
   this.progressMessages.delete(deploymentId);
   
 } catch (error) {
-  console.error('[ArchitectOrchestrator] Failed to finalize progress message:', error);
+  console.error("[ArchitectOrchestrator] Failed to finalize progress message:", error);
 }
 ```
 
@@ -225,12 +225,12 @@ const current = progress.currentStep;
 const start = Math.max(0, current - 2);
 const end = Math.min(steps.length, current + 3);
 
-let stepList = '';
+let stepList = "";
 for (let i = start; i < end; i++) {
   const step = steps[i];
   const emoji = this.getStatusEmoji(step.status);
   const isCurrent = i === current;
-  const arrow = isCurrent ? ' ← **Current**' : '';
+  const arrow = isCurrent ? " ← **Current**" : "";
   
   stepList += `${emoji} ${step.name}${arrow}\n`;
 }

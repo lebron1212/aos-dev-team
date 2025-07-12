@@ -220,8 +220,8 @@ Return ONLY this JSON structure with no other text:
         await this.registerBotWithCommander(spec, channelId || 'PLACEHOLDER_CHANNEL_ID');
       }
       
-      // 9. Commit the new agent safely
-      await this.commitNewAgentSafely(spec, createdFiles);
+      // 9. Commit the new agent 
+      await this.commitNewAgent(spec, createdFiles);
       
       return {
         summary: `Agent ${spec.name} created with ${discordBotCreated ? 'full Discord integration' : 'Discord setup pending'}${spec.createWatcher ? ' and learning watcher' : ''}`,

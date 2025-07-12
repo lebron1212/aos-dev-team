@@ -1,7 +1,7 @@
 import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
 import { CodeModifier } from '../operations/CodeModifier.js';
-import { ArchitectOrchestrator as AgentBuilder } from '../operations/AgentBuilder.js'; 
+import { AgentBuilder } from '../operations/AgentBuilder.js'; 
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
 import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';

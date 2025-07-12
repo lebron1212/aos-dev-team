@@ -1051,18 +1051,28 @@ async function ${startFunctionName}() {
     }
   }
 
-  private async commitNewAgentSafely(spec: AgentSpec, files: string[]): Promise<void> {
+  private async commitNewAgent(spec: AgentSpec, files: string[]): Promise<void> {
     try {
-      const gitAdd = await this.safeGitOperation('git add .');
-      if (!gitAdd) return;
+      // Check if git repository exists, initialize if needed
+      try {
+        execSync('git status', { stdio: 'pipe' });
+      } catch (error) {
+        console.log('[AgentBuilder] No git repository found, initializing...');
+        execSync('git init', { stdio: 'pipe' });
+        execSync('git config user.name "AI Development Team"', { stdio: 'pipe' });
+        execSync('git config user.email "ai@example.com"', { stdio: 'pipe' });
+      }
+
+      execSync('git add .', { stdio: 'pipe' });
+      execSync(`git commit -m "🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}"`, { stdio: 'pipe' });
       
-      const commitMessage = `🤖 Add ${spec.name} agent with full Discord integration and watcher\\n\\nFiles created:\\n${files.map(f => `- ${f}`).join('\\n')}`;
-      const gitCommit = await this.safeGitOperation(`git commit -m "${commitMessage}"`);
-      if (!gitCommit) return;
-      
-      const gitPush = await this.safeGitOperation('git push origin main');
-      if (gitPush) {
+      // Only push if remote origin exists
+      try {
+        execSync('git remote get-url origin', { stdio: 'pipe' });
+        execSync('git push origin main', { stdio: 'pipe' });
         console.log(`[AgentBuilder] Committed and deployed ${spec.name} agent with watcher`);
+      } catch (pushError) {
+        console.log(`[AgentBuilder] Committed ${spec.name} agent locally (no remote configured)`);
       }
     } catch (error) {
       console.error(`[AgentBuilder] Failed to commit ${spec.name}:`, error);

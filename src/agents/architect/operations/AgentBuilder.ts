@@ -1,6 +1,6 @@
-import { promises as fs } from ‘fs’;
-import path from ‘path’;
-import { ArchWatch } from ‘../intelligence/ArchWatch’;
+import { promises as fs } from “fs”;
+import path from “path”;
+import { ArchWatch } from “../intelligence/ArchWatch”;
 
 interface AgentSpec {
 name: string;
@@ -35,12 +35,12 @@ constructor(claudeApiKey: string, discordToken?: string) {
 this.claudeApiKey = claudeApiKey;
 this.discordToken = discordToken;
 this.baseDir = process.cwd();
-this.isRailway = process.env.RAILWAY_ENVIRONMENT === ‘production’ ||
-process.env.NODE_ENV === ‘production’;
+this.isRailway = process.env.RAILWAY_ENVIRONMENT === “production” ||
+process.env.NODE_ENV === “production”;
 
 ```
 if (this.isRailway) {
-  console.warn('[AgentBuilder] 🚂 Railway detected - files will be ephemeral. Using hybrid storage strategy.');
+  console.warn("[AgentBuilder] 🚂 Railway detected - files will be ephemeral. Using hybrid storage strategy.");
 }
 ```
 
@@ -54,11 +54,11 @@ if (this.isRailway) {
   console.log(`[AgentBuilder] Parsing requirements: ${requirements.substring(0, 100)}...`);
 
 ```
-const lines = requirements.split('\n').map(line => line.trim()).filter(Boolean);
+const lines = requirements.split("\n").map(line => line.trim()).filter(Boolean);
 
 // Extract name from various formats
-let name = '';
-let description = '';
+let name = "";
+let description = "";
 
 // Handle "/build agent NAME DESCRIPTION" format
 const buildMatch = requirements.match(/\/build\s+agent\s+(\w+)\s+"([^"]+)"/i);
@@ -78,14 +78,14 @@ if (buildMatch) {
     description = descMatch[1];
   } else {
     description = requirements.length > 50 ? 
-      requirements.substring(0, 50) + '...' : 
+      requirements.substring(0, 50) + "..." : 
       requirements;
   }
 }
 
 if (!name) {
   // Generate a default name
-  name = 'GeneratedAgent' + Date.now().toString().slice(-4);
+  name = "GeneratedAgent" + Date.now().toString().slice(-4);
   console.warn(`[AgentBuilder] No agent name found, using: ${name}`);
 }
 
@@ -152,7 +152,7 @@ try {
       // On other platforms, this is an error
       return {
         ready: false,
-        error: 'File system write permissions denied. Check directory permissions.'
+        error: "File system write permissions denied. Check directory permissions."
       };
     }
   } else if (successCount < totalFiles) {
@@ -180,11 +180,11 @@ try {
 
 } catch (error) {
   console.error(`[AgentBuilder] Failed to build agent:`, error);
-  ArchWatch.log('agent-creation', 'high', 'failure');
+  ArchWatch.log("agent-creation", "high", "failure");
   
   return {
     ready: false,
-    error: error instanceof Error ? error.message : 'Unknown error during agent creation'
+    error: error instanceof Error ? error.message : "Unknown error during agent creation"
   };
 }
 ```
@@ -196,7 +196,7 @@ try {
 - Check if agent already exists
   */
   private async agentExists(name: string): Promise<boolean> {
-  const agentDir = path.join(this.baseDir, ‘src’, ‘agents’, name.toLowerCase());
+  const agentDir = path.join(this.baseDir, “src”, “agents”, name.toLowerCase());
   try {
   await fs.access(agentDir);
   return true;
@@ -211,7 +211,7 @@ try {
   */
   private async writeAgentFiles(agentSpec: AgentSpec): Promise<FileWriteResult[]> {
   const results: FileWriteResult[] = [];
-  const agentDir = path.join(this.baseDir, ‘src’, ‘agents’, agentSpec.name.toLowerCase());
+  const agentDir = path.join(this.baseDir, “src”, “agents”, agentSpec.name.toLowerCase());
 
 ```
 try {
@@ -233,7 +233,7 @@ try {
   results.push({
     success: false,
     path: agentDir,
-    error: error instanceof Error ? error.message : 'Unknown error'
+    error: error instanceof Error ? error.message : "Unknown error"
   });
 }
 
@@ -252,13 +252,13 @@ return results;
   await this.ensureDirectory(path.dirname(filePath));
   
   // Write file
-  await fs.writeFile(filePath, content, ‘utf8’);
+  await fs.writeFile(filePath, content, “utf8”);
   
   // Verify file was written
   const stats = await fs.stat(filePath);
   
   // Read back and verify content (basic check)
-  const writtenContent = await fs.readFile(filePath, ‘utf8’);
+  const writtenContent = await fs.readFile(filePath, “utf8”);
   if (writtenContent.length !== content.length) {
   throw new Error(`Content verification failed: expected ${content.length} chars, got ${writtenContent.length}`);
   }
@@ -273,7 +273,7 @@ return results;
 
 ```
 } catch (error) {
-  const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+  const errorMsg = error instanceof Error ? error.message : "Unknown error";
   console.error(`[AgentBuilder] ❌ Failed to write ${filePath}: ${errorMsg}`);
   
   return {
@@ -298,7 +298,7 @@ return results;
   await fs.mkdir(dirPath, { recursive: true });
   console.log(`[AgentBuilder] Created directory: ${dirPath}`);
   } catch (error) {
-  const errorMsg = error instanceof Error ? error.message : ‘Unknown error’;
+  const errorMsg = error instanceof Error ? error.message : “Unknown error”;
   console.error(`[AgentBuilder] Failed to create directory ${dirPath}: ${errorMsg}`);
   throw error;
   }
@@ -318,8 +318,8 @@ return {
   [`communication/${className}Discord.ts`]: this.generateDiscordFile(agentSpec),
   [`core/${className}Core.ts`]: this.generateCoreFile(agentSpec),
   [`intelligence/${className}Watcher.ts`]: this.generateWatcherFile(agentSpec),
-  'index.ts': this.generateIndexFile(agentSpec),
-  'README.md': this.generateReadmeFile(agentSpec)
+  "index.ts": this.generateIndexFile(agentSpec),
+  "README.md": this.generateReadmeFile(agentSpec)
 };
 ```
 
@@ -347,17 +347,8 @@ import { ${className}Watcher } from ‘./intelligence/${className}Watcher’;
 
 constructor() {
 this.core = new ${className}Core();
-
-```
-${agentSpec.discordEnabled ? `
-if (process.env.${agentSpec.name.toUpperCase()}_DISCORD_TOKEN) {
-  this.discord = new ${className}Discord(this.core);
-}` : ''}
-
-${agentSpec.watcherEnabled ? `
-this.watcher = new ${className}Watcher(this.core);` : ''}
-```
-
+${agentSpec.discordEnabled ? ` if (process.env.${agentSpec.name.toUpperCase()}_DISCORD_TOKEN) { this.discord = new ${className}Discord(this.core); }` : “”}
+${agentSpec.watcherEnabled ? ` this.watcher = new ${className}Watcher(this.core);` : “”}
 }
 
 async initialize(): Promise<void> {
@@ -590,7 +581,7 @@ ${agentSpec.description}
 
 ## Features
 
-${agentSpec.capabilities.map(cap => `- ${cap}`).join(’\n’)}
+${agentSpec.capabilities.map(cap => `- ${cap}`).join(”\n”)}
 
 ## Configuration
 
@@ -625,28 +616,28 @@ This agent was generated by AgentBuilder on ${new Date().toISOString()}.
   const desc = description.toLowerCase();
 
 ```
-if (desc.includes('storage') || desc.includes('persist')) {
-  capabilities.push('Data Storage');
+if (desc.includes("storage") || desc.includes("persist")) {
+  capabilities.push("Data Storage");
 }
-if (desc.includes('queue') || desc.includes('task')) {
-  capabilities.push('Task Management');
+if (desc.includes("queue") || desc.includes("task")) {
+  capabilities.push("Task Management");
 }
-if (desc.includes('discord') || desc.includes('chat')) {
-  capabilities.push('Discord Integration');
+if (desc.includes("discord") || desc.includes("chat")) {
+  capabilities.push("Discord Integration");
 }
-if (desc.includes('analysis') || desc.includes('analyze')) {
-  capabilities.push('Data Analysis');
+if (desc.includes("analysis") || desc.includes("analyze")) {
+  capabilities.push("Data Analysis");
 }
-if (desc.includes('monitor') || desc.includes('watch')) {
-  capabilities.push('System Monitoring');
+if (desc.includes("monitor") || desc.includes("watch")) {
+  capabilities.push("System Monitoring");
 }
-if (desc.includes('test') || desc.includes('verify')) {
-  capabilities.push('Testing & Verification');
+if (desc.includes("test") || desc.includes("verify")) {
+  capabilities.push("Testing & Verification");
 }
 
 // Default capability if none inferred
 if (capabilities.length === 0) {
-  capabilities.push('General Purpose Processing');
+  capabilities.push("General Purpose Processing");
 }
 
 return capabilities;

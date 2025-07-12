@@ -1,7 +1,7 @@
 import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
 import { CodeModifier } from '../operations/CodeModifier.js';
-import { agentBuilder } from '../operations/AgentBuilder.js'; // Use the fixed singleton
+import { ArchitectOrchestrator } from '../operations/AgentBuilder.js'; 
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
 import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';

@@ -2,20 +2,31 @@ import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
 import { CodeModifier } from '../operations/CodeModifier.js';
 import { AgentBuilder } from '../operations/AgentBuilder.js';
+import { SystemRefiner } from '../operations/SystemRefiner.js';
+import { ArchitectVoice } from '../communication/ArchitectVoice.js';
+import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
 import { DiscordBotCreator } from '../operations/DiscordBotCreator.js';
 
 export class ArchitectOrchestrator {
   private codeAnalyzer: CodeAnalyzer;
   private modifier: CodeModifier;
   private builder: AgentBuilder;
+  private refiner: SystemRefiner;
+  private voice: ArchitectVoice;
+  private intelligence: CodeIntelligence;
   private discordCreator?: DiscordBotCreator;
-  private discord: any; // Discord interface
+  
+  // Add state management for pending operations
+  private pendingModifications: Map<string, any> = new Map();
+  private lastResponse: Map<string, string> = new Map();
 
-  constructor(config: ArchitectConfig, discord: any) {
+  constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
     this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
-    this.discord = discord;
+    this.refiner = new SystemRefiner(config.claudeApiKey);
+    this.voice = new ArchitectVoice(config.claudeApiKey);
+    this.intelligence = new CodeIntelligence(config.claudeApiKey);
     
     if (config.discordToken) {
       this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.discordToken);
@@ -23,127 +34,165 @@ export class ArchitectOrchestrator {
   }
 
   async executeArchitecturalWork(request: ArchitecturalRequest): Promise<string> {
-    console.log(`[Architect] Executing: ${request.type} - ${request.description}`);
+    console.log(`[ArchitectOrchestrator] Executing: ${request.type} - ${request.description}`);
     
-    // Send start notification
-    await this.sendProgressUpdate(`🏗️ **Started**: ${request.description}`, 'started');
+    // Check for approval of pending modifications
+    if (request.description.toLowerCase().trim() === 'approve') {
+      return await this.handleApproval(request);
+    }
+    
+    // Handle special commands first
+    if (request.description.toLowerCase().includes('undo last')) {
+      return await this.handleUndo();
+    }
+    
+    if (request.description.toLowerCase().includes('redo') || request.description.toLowerCase().includes('history')) {
+      return await this.handleHistory();
+    }
+    
+    // Check if this is an intelligence request that should be handled specially
+    if (await this.shouldUseIntelligence(request)) {
+      return await this.handleIntelligenceRequest(request);
+    }
+    
+    switch (request.type) {
+      case 'code-analysis':
+        return await this.handleCodeAnalysis(request);
+      case 'system-modification':
+        return await this.handleSystemModification(request);
+      case 'agent-creation':
+        return await this.handleAgentCreation(request);
+      case 'behavior-refinement':
+        return await this.handleBehaviorRefinement(request);
+      case 'system-status':
+        return await this.handleSystemStatus(request);
+      case 'discord-bot-setup':
+        return await this.handleDiscordBotSetup(request);
+      default:
+        return await this.voice.formatResponse("Request type not recognized. Please specify what you'd like me to analyze, modify, or build.", { type: 'error' });
+    }
+  }
+
+  private async handleApproval(request: ArchitecturalRequest): Promise<string> {
+    // Check if there are any pending modifications to approve
+    const pendingKeys = Array.from(this.pendingModifications.keys());
+    
+    if (pendingKeys.length === 0) {
+      return await this.voice.formatResponse("No pending modifications to approve.", { type: 'info' });
+    }
+    
+    // Get the most recent pending modification
+    const latestKey = pendingKeys[pendingKeys.length - 1];
+    const pendingPlan = this.pendingModifications.get(latestKey);
+    
+    if (!pendingPlan) {
+      return await this.voice.formatResponse("No valid modification plan found.", { type: 'error' });
+    }
     
     try {
-      let result: any;
+      // Execute the pending modification
+      const result = await this.modifier.executeModification(pendingPlan);
       
-      switch (request.type) {
-        case 'code-analysis':
-          result = await this.handleCodeAnalysis(request);
-          break;
-        case 'system-modification':
-          result = await this.handleSystemModification(request);
-          break;
-        case 'agent-creation':
-          result = await this.handleAgentCreation(request);
-          break;
-        case 'discord-bot-setup':
-          result = await this.handleDiscordBotSetup(request);
-          break;
-        case 'system-status':
-          result = await this.handleSystemStatus(request);
-          break;
-        default:
-          result = `Unknown request type: ${request.type}`;
+      // Clear the pending modification
+      this.pendingModifications.delete(latestKey);
+      
+      if (result.committed) {
+        return await this.voice.formatResponse(`Approved and executed: ${result.summary}. Changes deployed automatically.`, { type: 'completion' });
+      } else {
+        return await this.voice.formatResponse(`Execution failed: ${result.summary}`, { type: 'error' });
       }
-
-      // Send completion notification
-      await this.sendProgressUpdate(`✅ **Completed**: ${request.description}\n\n${result}`, 'completed');
-      return result;
-
     } catch (error) {
-      const errorMsg = `❌ **Failed**: ${request.description}\n\nError: ${error.message}`;
-      await this.sendProgressUpdate(errorMsg, 'failed');
-      return errorMsg;
+      this.pendingModifications.delete(latestKey);
+      return await this.voice.formatResponse(`Execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { type: 'error' });
     }
   }
 
   private async handleCodeAnalysis(request: ArchitecturalRequest): Promise<string> {
-    await this.sendProgressUpdate(`🔍 Analyzing codebase...`, 'progress');
-    
     const analysis = await this.codeAnalyzer.analyzeCodebase(request.description);
     
-    return `Code Analysis Complete:
-- Health Score: ${analysis.healthScore}%
-- Issues: ${analysis.issues.length}
-- Files Analyzed: ${analysis.files?.length || 0}
-- Suggestions: ${analysis.suggestions.join(', ')}`;
+    const summary = `Analysis complete: ${analysis.summary}
+    
+Issues found: ${analysis.issues.length > 0 ? analysis.issues.join(', ') : 'None'}
+Suggestions: ${analysis.suggestions.join(', ')}
+Health: ${analysis.healthScore}%`;
+    
+    return await this.voice.formatResponse(summary, { type: 'analysis' });
   }
 
   private async handleSystemModification(request: ArchitecturalRequest): Promise<string> {
-    await this.sendProgressUpdate(`⚙️ Planning modifications...`, 'progress');
-    
     const plan = await this.modifier.planModification(request.description);
     
     if (plan.requiresApproval) {
-      return `Modification plan ready:
-- Risk Level: ${plan.riskLevel}
-- Files: ${plan.files.join(', ')}
-- Changes: ${plan.changes.length}
-
-Reply "approve" to execute.`;
+      // Store the plan for later approval
+      const planKey = `plan_${Date.now()}`;
+      this.pendingModifications.set(planKey, plan);
+      
+      return await this.voice.formatResponse(`Plan generated: ${plan.description}. Files: ${plan.files.join(', ')}. Risk: ${plan.riskLevel}. Reply "approve" to execute.`, { type: 'confirmation' });
     }
     
-    await this.sendProgressUpdate(`🔧 Executing modifications...`, 'progress');
     const result = await this.modifier.executeModification(plan);
     
-    return `Modification ${result.committed ? 'completed' : 'failed'}:
-${result.summary}
-Files changed: ${plan.files.join(', ')}`;
+    if (result.committed) {
+      return await this.voice.formatResponse(`Modification complete: ${result.summary}. Changes deployed automatically.`, { type: 'completion' });
+    } else {
+      return await this.voice.formatResponse(`Modification failed: ${result.summary}`, { type: 'error' });
+    }
   }
 
   private async handleAgentCreation(request: ArchitecturalRequest): Promise<string> {
-    await this.sendProgressUpdate(`🤖 Building new agent...`, 'progress');
+    console.log(`[ArchitectOrchestrator] Creating agent from request: ${request.description}`);
     
     const agentSpec = await this.builder.parseAgentRequirements(request.description);
-    
-    await this.sendProgressUpdate(`📁 Creating agent structure...`, 'progress');
     const buildResult = await this.builder.generateAgent(agentSpec);
     
     if (buildResult.ready) {
-      return `Agent ${agentSpec.name} created successfully:
-- Files: ${buildResult.files?.length || 0}
-- Discord Integration: ${buildResult.discordBotCreated ? 'Yes' : 'Pending'}
-- Watcher: ${buildResult.watcherCreated ? 'Yes' : 'No'}
-
-Agent is ready for deployment.`;
+      const envVars = buildResult.environmentVars ? 
+        `\n\nTo complete setup:\n${buildResult.environmentVars.map((v: string) => `railway variables --set ${v}=your_token_here`).join('\n')}` : '';
+      
+      return await this.voice.formatResponse(`Agent ${agentSpec.name} created successfully. ${buildResult.summary}.${envVars}`, { type: 'creation' });
+    } else {
+      return await this.voice.formatResponse(`Agent creation failed: ${buildResult.error}`, { type: 'error' });
     }
-    
-    return `Agent creation failed: ${buildResult.error}`;
+  }
+
+  private async handleBehaviorRefinement(request: ArchitecturalRequest): Promise<string> {
+    const refinement = await this.refiner.refineBehavior(request.description);
+    return await this.voice.formatResponse(`Behavior refinement: ${refinement.summary}`, { type: 'refinement' });
+  }
+
+  private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
+    const status = await this.codeAnalyzer.getSystemHealth();
+    return await this.voice.formatResponse(`System status: ${status.summary}. ${status.issues.length > 0 ? 'Issues: ' + status.issues.join(', ') : 'All systems operational.'}`, { type: 'status' });
   }
 
   private async handleDiscordBotSetup(request: ArchitecturalRequest): Promise<string> {
+    console.log(`[ArchitectOrchestrator] Setting up Discord bot: ${request.description}`);
+    
     if (!this.discordCreator) {
-      return "Discord bot creation unavailable - Discord token not configured";
+      return await this.voice.formatResponse("Discord bot creation unavailable - Discord token not configured", { type: 'error' });
     }
     
-    // Extract agent name
+    // Extract agent name from request
     const agentName = this.extractAgentName(request.description);
     if (!agentName) {
-      return "Could not identify agent name from request";
+      return await this.voice.formatResponse("Could not identify agent name. Please specify which agent needs Discord setup (e.g., 'Set up Discord bot for Dashboard agent')", { type: 'error' });
     }
     
-    await this.sendProgressUpdate(`🤖 Creating Discord bot for ${agentName}...`, 'progress');
-    
-    // Check if agent exists
+    // Check if agent exists in codebase
     const agentExists = await this.checkAgentExists(agentName);
     if (!agentExists) {
-      return `Agent '${agentName}' not found. Available: Commander, Architect, Dashboard`;
+      return await this.voice.formatResponse(`Agent '${agentName}' not found in codebase. Available agents: Commander, Architect, Dashboard`, { type: 'error' });
     }
     
     try {
-      await this.sendProgressUpdate(`⚙️ Creating Discord application...`, 'progress');
-      const botConfig = await this.discordCreator.createDiscordBot(agentName, `AI Agent for ${agentName}`);
+      // Create Discord bot for the existing agent
+      const botConfig = await this.discordCreator.createDiscordBot(agentName, `AI Agent for ${agentName} operations`);
       
       if (!botConfig) {
-        return `Failed to create Discord bot for ${agentName}`;
+        return await this.voice.formatResponse(`Failed to create Discord bot for ${agentName}. Check Discord API access and try again.`, { type: 'error' });
       }
       
-      await this.sendProgressUpdate(`📺 Creating dedicated channel...`, 'progress');
+      // Create dedicated channel 
       let channelId = '';
       const guildId = process.env.DISCORD_GUILD_ID;
       if (guildId) {
@@ -153,81 +202,51 @@ Agent is ready for deployment.`;
         }
       }
       
-      await this.sendProgressUpdate(`🚀 Setting environment variables...`, 'progress');
+      const summary = `Discord bot created for ${agentName}!
       
-      return `Discord bot created for ${agentName}:
+🤖 Application: ${agentName} Agent (${botConfig.clientId})
+🔑 Token: ${botConfig.token.substring(0, 20)}...
+📺 Channel: ${channelId ? `#${agentName.toLowerCase()} (${channelId})` : 'Channel creation pending'}
+🔗 Invite URL: ${botConfig.inviteUrl}
 
-🤖 **Bot Details:**
-- Application: ${agentName} Agent
-- Token: ${botConfig.token.substring(0, 20)}...
-- Channel: ${channelId ? `#${agentName.toLowerCase()}` : 'Pending'}
-- Invite: ${botConfig.inviteUrl}
+🚀 Environment variables set automatically via Railway CLI
+⚙️ Deployment triggered automatically
 
-🔧 **Next Steps:**
-1. Add bot to server using invite URL
-2. Verify ${agentName} starts successfully
-3. Test bot responds in channel
+Next steps:
+1. Add bot to Discord server using invite URL above
+2. Verify ${agentName} starts successfully in logs
+3. Test ${agentName} responds in #${agentName.toLowerCase()} channel
 
 Setup complete!`;
 
-    } catch (error) {
-      return `Discord bot setup failed: ${error.message}`;
-    }
-  }
-
-  private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
-    await this.sendProgressUpdate(`🩺 Checking system health...`, 'progress');
-    
-    try {
-      const status = await this.codeAnalyzer.getSystemHealth();
+      return await this.voice.formatResponse(summary, { type: 'creation' });
       
-      return `System Status Report:
-- Status: ${status.status}
-- Health Score: ${status.complexity || 'N/A'}%
-- Files Analyzed: ${status.filesAnalyzed || 0}
-- Issues: ${status.issues?.length || 0}
-- API Cost: ${status.apiCost?.toFixed(4) || '0.0000'}
-- Recommendations: ${status.recommendations?.join(', ') || 'None'}
-
-${status.issues?.length > 0 ? '\n⚠️ Issues Found:\n' + status.issues.join('\n') : '✅ No critical issues detected'}`;
     } catch (error) {
-      return `System status check failed: ${error.message}`;
-    }
-  }
-
-  private async sendProgressUpdate(message: string, status: 'started' | 'progress' | 'completed' | 'failed'): Promise<void> {
-    if (!this.discord) return;
-    
-    const timestamp = new Date().toLocaleTimeString();
-    const statusIcon = {
-      started: '🏗️',
-      progress: '⏳', 
-      completed: '✅',
-      failed: '❌'
-    }[status];
-    
-    const formattedMessage = `${statusIcon} **[${timestamp}]** ${message}`;
-    
-    try {
-      await this.discord.sendMessage(formattedMessage);
-    } catch (error) {
-      console.error('[Architect] Failed to send progress update:', error);
+      console.error('[ArchitectOrchestrator] Discord bot setup failed:', error);
+      return await this.voice.formatResponse(`Discord bot setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { type: 'error' });
     }
   }
 
   private extractAgentName(description: string): string | null {
+    const lowerDesc = description.toLowerCase();
+    
+    // Look for common patterns
     const patterns = [
-      /set up discord bot for (\w+)/i,
-      /discord bot for (\w+)/i,
-      /(\w+) agent/i
+      /(?:set up|setup|create) discord bot for (\w+)/i,
+      /discord (?:bot|integration) for (\w+)/i,
+      /(\w+) agent/i,
+      /(\w+) discord/i
     ];
     
     for (const pattern of patterns) {
       const match = description.match(pattern);
       if (match) {
-        return match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+        const agentName = match[1];
+        // Capitalize first letter
+        return agentName.charAt(0).toUpperCase() + agentName.slice(1).toLowerCase();
       }
     }
+    
     return null;
   }
 
@@ -239,6 +258,81 @@ ${status.issues?.length > 0 ? '\n⚠️ Issues Found:\n' + status.issues.join('\
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private async handleUndo(): Promise<string> {
+    const result = await this.modifier.undoLastModification();
+    
+    if (result.success) {
+      return await this.voice.formatResponse(`Undone: ${result.message}. Files restored: ${result.restoredFiles?.join(', ') || 'various'}`, { type: 'completion' });
+    } else {
+      return await this.voice.formatResponse(`Undo failed: ${result.message}`, { type: 'error' });
+    }
+  }
+
+  private async handleHistory(): Promise<string> {
+    return await this.voice.formatResponse("Modification history available. Recent changes tracked with git commits.", { type: 'info' });
+  }
+
+  /**
+   * Check if request should use the new intelligence system
+   */
+  private async shouldUseIntelligence(request: ArchitecturalRequest): Promise<boolean> {
+    const lowerDesc = request.description.toLowerCase();
+    
+    // Intelligence patterns
+    const isConfigQuery = lowerDesc.includes('what\'s') || lowerDesc.includes('current') || 
+                         lowerDesc.includes('how many') || lowerDesc.includes('show me');
+    
+    const isTargetedModification = lowerDesc.includes('tone down') || lowerDesc.includes('increase') ||
+                                  lowerDesc.includes('change') && (lowerDesc.includes('to') || lowerDesc.includes('from'));
+    
+    const isFeatureAnalysis = lowerDesc.includes('how does') && lowerDesc.includes('work');
+    
+    return isConfigQuery || isTargetedModification || isFeatureAnalysis;
+  }
+
+  /**
+   * Handle requests using the new intelligence system
+   */
+  private async handleIntelligenceRequest(request: ArchitecturalRequest): Promise<string> {
+    console.log(`[ArchitectOrchestrator] Using intelligence system for: ${request.description}`);
+    
+    try {
+      const result = await this.intelligence.processRequest(request.description);
+      
+      if (result.success) {
+        let response = `${result.summary}\n\n${result.details}`;
+        
+        if (result.configurations && result.configurations.length > 0) {
+          response += `\n\nKey Configurations:\n`;
+          result.configurations.slice(0, 5).forEach(config => {
+            response += `• ${config.key}: ${config.value} (${config.file.split('/').pop()}:${config.line})\n`;
+          });
+        }
+        
+        if (result.modifications && result.modifications.length > 0) {
+          response += `\n\nProposed Changes:\n`;
+          result.modifications.forEach(mod => {
+            response += `• ${mod}\n`;
+          });
+        }
+        
+        if (result.affectedFiles.length > 0) {
+          response += `\n\nFiles Analyzed: ${result.affectedFiles.length} files`;
+        }
+        
+        return await this.voice.formatResponse(response, { type: 'intelligence' });
+      } else {
+        // Fall back to standard processing
+        console.log(`[ArchitectOrchestrator] Intelligence processing failed, falling back to standard: ${result.summary}`);
+        return await this.handleCodeAnalysis(request);
+      }
+    } catch (error) {
+      console.error('[ArchitectOrchestrator] Intelligence system error:', error);
+      // Fall back to standard processing
+      return await this.handleCodeAnalysis(request);
     }
   }
 }

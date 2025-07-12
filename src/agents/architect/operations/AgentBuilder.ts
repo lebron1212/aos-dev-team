@@ -1,8 +1,8 @@
-import { ArchitecturalRequest, ArchitectConfig } from ‘../types/index.js’;
-import { LiveDeploymentTracker } from ‘../operations/LiveDeploymentTracker.js’;
-import { ArchitectVoice } from ‘../communication/ArchitectVoice.js’;
-import { ArchitectDiscord } from ‘../communication/ArchitectDiscord.js’;
-import { Message } from ‘discord.js’;
+import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
+import { LiveDeploymentTracker } from '../operations/LiveDeploymentTracker.js’;
+import { ArchitectVoice } from '../communication/ArchitectVoice.js’;
+import { ArchitectDiscord } from '../communication/ArchitectDiscord.js’;
+import { Message } from 'discord.js’;
 
 export class ArchitectOrchestrator {
 private liveDeployer: LiveDeploymentTracker;
@@ -75,11 +75,11 @@ ${deploymentResult.summary}
 Quick Access:
 
 - Agent URL: ${deploymentResult.agentUrl}
-- Discord Bot: ${deploymentResult.discordSetup?.inviteUrl || ‘N/A’}
+- Discord Bot: ${deploymentResult.discordSetup?.inviteUrl || 'N/A’}
 - Total Time: ${deploymentResult.actualDeploymentTime}
 
 Your agent is live and ready to use!`,
-{ type: ‘creation’ }
+{ type: 'creation’ }
 );
 
 } else {
@@ -95,7 +95,7 @@ Error: ${deploymentResult.error}
 Failed At: ${deploymentResult.failedAt}
 
 You can retry the deployment - all progress has been cleaned up.`,
-{ type: ‘error’ }
+{ type: 'error’ }
 );
 }
 
@@ -126,8 +126,8 @@ const updatedContent = `LAUNCH - Deploying ${progress.agentName}
 Progress:
 ${progressBar} ${progress.overallProgress.toFixed(1)}%
 
-Current Step: ${currentStep?.name || ‘Unknown’}
-Status: ${this.getStatusEmoji(currentStep?.status)} ${currentStep?.status || ‘Unknown’}
+Current Step: ${currentStep?.name || 'Unknown’}
+Status: ${this.getStatusEmoji(currentStep?.status)} ${currentStep?.status || 'Unknown’}
 Elapsed: ${this.formatDuration(elapsed)}
 ETA: ${eta}
 
@@ -183,7 +183,7 @@ Failed At: ${result.failedAt}
 Status: Deployment Failed
 
 Steps Completed:
-${result.timingBreakdown?.filter((t: any) => t.status === ‘completed’).map((t: any) => `[DONE] ${t.step}: ${t.duration}`).join(’\n’) || ‘None’}
+${result.timingBreakdown?.filter((t: any) => t.status === 'completed’).map((t: any) => `[DONE] ${t.step}: ${t.duration}`).join(’\n’) || 'None’}
 
 -----
 
@@ -204,7 +204,7 @@ console.error(”[ArchitectOrchestrator] Failed to finalize progress message:”
 private generateProgressBar(progress: number, length: number = 20): string {
 const filled = Math.round((progress / 100) * length);
 const empty = length - filled;
-return ‘█’.repeat(filled) + ‘░’.repeat(empty);
+return '█’.repeat(filled) + '░’.repeat(empty);
 }
 
 private generateStepList(progress: any): string {
@@ -231,11 +231,11 @@ return stepList.trim();
 
 private getStatusEmoji(status?: string): string {
 switch (status) {
-case ‘completed’: return ‘[DONE]’;
-case ‘running’: return ‘[RUNNING]’;
-case ‘failed’: return ‘[FAILED]’;
-case ‘pending’: return ‘[PENDING]’;
-default: return ‘[UNKNOWN]’;
+case 'completed’: return '[DONE]’;
+case 'running’: return '[RUNNING]’;
+case 'failed’: return '[FAILED]’;
+case 'pending’: return '[PENDING]’;
+default: return '[UNKNOWN]’;
 }
 }
 

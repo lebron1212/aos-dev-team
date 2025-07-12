@@ -1,7 +1,7 @@
 import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
 import { CodeModifier } from '../operations/CodeModifier.js';
-import { ArchitectOrchestrator } from '../operations/AgentBuilder.js'; 
+import { ArchitectOrchestrator as AgentBuilder } from '../operations/AgentBuilder.js'; 
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
 import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
@@ -14,11 +14,11 @@ export class ArchitectOrchestrator {
   private voice: ArchitectVoice;
   private intelligence: CodeIntelligence;
   private discordCreator?: DiscordBotCreator;
+  private agentBuilder: AgentBuilder;
   
   // Add state management for pending operations
   private pendingModifications: Map<string, any> = new Map();
   private lastResponse: Map<string, string> = new Map();
-  private agentBuilder: ArchitectOrchestrator;
 
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
@@ -26,7 +26,7 @@ export class ArchitectOrchestrator {
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.intelligence = new CodeIntelligence(config.claudeApiKey);
-    this.agentBuilder = new ArchitectOrchestrator(config);
+    this.agentBuilder = new AgentBuilder(config);
     
     if (config.discordToken) {
       this.discordCreator = new DiscordBotCreator(config.claudeApiKey, config.discordToken);
@@ -159,8 +159,8 @@ Health: ${analysis.healthScore}%`;
       const success = await this.agentBuilder.buildCompleteAgent(request.description);
       
       if (success) {
-        const config = agentBuilder.parseRequirements(request.description);
-        const storedAgents = agentBuilder.getStoredAgents();
+        const config = this.agentBuilder.parseRequirements(request.description);
+        const storedAgents = this.agentBuilder.getStoredAgents();
         
         // Check if environment variables are needed
         const envVars = config.discordEnabled ? 
@@ -181,7 +181,7 @@ Health: ${analysis.healthScore}%`;
         return await this.voice.formatResponse(summary, { type: 'creation' });
       } else {
         // Partial success - agent in memory but files may have failed
-        const config = agentBuilder.parseRequirements(request.description);
+        const config = this.agentBuilder.parseRequirements(request.description);
         const isRailway = process.env.RAILWAY_ENVIRONMENT === 'production';
         
         const message = `Agent ${config.name} partially created. ${isRailway ? 
@@ -229,9 +229,9 @@ Health: ${analysis.healthScore}%`;
     const agentExists = await this.checkAgentExists(agentName);
     if (!agentExists) {
       // Check in memory (AgentBuilder's stored agents)
-      const storedAgent = agentBuilder.getAgentConfig(agentName);
+      const storedAgent = this.agentBuilder.getAgentConfig(agentName);
       if (!storedAgent) {
-        const availableAgents = agentBuilder.getStoredAgents().map(a => a.name).join(', ') || 'None';
+        const availableAgents = this.agentBuilder.getStoredAgents().map(a => a.name).join(', ') || 'None';
         return await this.voice.formatResponse(`Agent '${agentName}' not found in codebase or memory. Available agents: ${availableAgents}`, { type: 'error' });
       }
     }
@@ -256,13 +256,13 @@ Health: ${analysis.healthScore}%`;
       
       const summary = `Discord bot created for ${agentName}!
       
-🤖 Application: ${agentName} Agent (${botConfig.clientId})
-🔑 Token: ${botConfig.token.substring(0, 20)}...
-📺 Channel: ${channelId ? `#${agentName.toLowerCase()} (${channelId})` : 'Channel creation pending'}
-🔗 Invite URL: ${botConfig.inviteUrl}
+Application: ${agentName} Agent (${botConfig.clientId})
+Token: ${botConfig.token.substring(0, 20)}...
+Channel: ${channelId ? `#${agentName.toLowerCase()} (${channelId})` : 'Channel creation pending'}
+Invite URL: ${botConfig.inviteUrl}
 
-🚀 Environment variables set automatically via Railway CLI
-⚙️ Deployment triggered automatically
+Environment variables set automatically via Railway CLI
+Deployment triggered automatically
 
 Next steps:
 1. Add bot to Discord server using invite URL above

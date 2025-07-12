@@ -1,496 +1,267 @@
-import fs from “fs”;
-import path from “path”;
+import { ArchitecturalRequest, ArchitectConfig } from ‘../types/index.js’;
+import { LiveDeploymentTracker } from ‘../operations/LiveDeploymentTracker.js’;
+import { ArchitectVoice } from ‘../communication/ArchitectVoice.js’;
+import { ArchitectDiscord } from ‘../communication/ArchitectDiscord.js’;
+import { Message } from ‘discord.js’;
 
-interface AgentSpec {
-name: string;
-description: string;
-capabilities: string[];
-discordEnabled: boolean;
-watcherEnabled: boolean;
+export class ArchitectOrchestrator {
+private liveDeployer: LiveDeploymentTracker;
+private voice: ArchitectVoice;
+private discord: ArchitectDiscord;
+private progressMessages: Map<string, Message> = new Map(); // deploymentId -> Discord Message object
+
+constructor(config: ArchitectConfig) {
+this.liveDeployer = new LiveDeploymentTracker(config.claudeApiKey, config.discordToken);
+this.voice = new ArchitectVoice(config.claudeApiKey);
+this.discord = new ArchitectDiscord(config);
 }
 
-interface BuildResult {
-ready: boolean;
-summary: string;
-error?: string;
-environmentVars?: string[];
-}
-
-export class AgentBuilder {
-private claudeApiKey: string;
-private discordToken?: string;
-private baseDir: string;
-private isRailway: boolean;
-
-constructor(claudeApiKey: string, discordToken?: string) {
-this.claudeApiKey = claudeApiKey;
-this.discordToken = discordToken;
-this.baseDir = process.cwd();
-this.isRailway = process.env.RAILWAY_ENVIRONMENT === “production”;
-
-```
-if (this.isRailway) {
-  console.warn("AgentBuilder: Railway detected - files will be ephemeral");
-}
-```
-
-}
-
-async parseAgentRequirements(requirements: string): Promise<AgentSpec> {
-console.log(“Parsing requirements:”, requirements.substring(0, 100));
-
-```
-let name = "";
-let description = "";
-
-// Handle "/build agent NAME DESCRIPTION" format
-const buildMatch = requirements.match(/\/build\s+agent\s+(\w+)\s+"([^"]+)"/i);
-if (buildMatch) {
-  name = buildMatch[1];
-  description = buildMatch[2];
-} else {
-  // Handle "Create a new AI agent named 'NAME'" format
-  const createMatch = requirements.match(/named\s+['"]?(\w+)['"]?/i);
-  if (createMatch) {
-    name = createMatch[1];
-  }
-  
-  // Extract description from context
-  const descMatch = requirements.match(/"([^"]+)"/);
-  if (descMatch) {
-    description = descMatch[1];
-  } else {
-    description = requirements.length > 50 ? 
-      requirements.substring(0, 50) + "..." : 
-      requirements;
-  }
-}
-
-if (!name) {
-  name = "GeneratedAgent" + Date.now().toString().slice(-4);
-  console.warn("No agent name found, using:", name);
-}
-
-const capabilities = this.inferCapabilities(description);
-
-const agentSpec: AgentSpec = {
-  name,
-  description,
-  capabilities,
-  discordEnabled: true,
-  watcherEnabled: true
-};
-
-console.log("Parsed agent spec:", agentSpec);
-return agentSpec;
-```
-
-}
-
-async generateAgent(agentSpec: AgentSpec): Promise<BuildResult> {
-console.log(“Building agent:”, agentSpec.name);
+private async handleAgentCreation(request: ArchitecturalRequest): Promise<string> {
+console.log(`[ArchitectOrchestrator] Starting live tracked deployment: ${request.description}`);
 
 ```
 try {
-  // Check for existing agent
-  if (await this.agentExists(agentSpec.name)) {
-    console.warn("Agent already exists:", agentSpec.name);
-  }
+  // Send ONE initial progress message that we'll keep updating
+  const initialProgressMessage = `🚀 **Starting Agent Deployment**
+```
 
-  // Try to write files
-  const fileResults = await this.writeAgentFiles(agentSpec);
-  const successCount = fileResults.filter(r => r.success).length;
-  const totalFiles = fileResults.length;
-  
-  console.log("File operations:", successCount + "/" + totalFiles, "successful");
-  
-  const environmentVars: string[] = [];
-  if (agentSpec.discordEnabled) {
-    environmentVars.push(agentSpec.name.toUpperCase() + "_DISCORD_TOKEN");
-  }
+⏳ Initializing deployment pipeline…
 
-  if (successCount === 0) {
-    console.error("All file operations failed!");
-    
-    if (this.isRailway) {
-      return {
-        ready: true,
-        summary: "Agent " + agentSpec.name + " created in memory (Railway ephemeral filesystem)",
-        environmentVars: environmentVars.length > 0 ? environmentVars : undefined
-      };
-    } else {
-      return {
-        ready: false,
-        error: "File system write permissions denied. Check directory permissions."
-      };
+📊 **Progress**
+░░░░░░░░░░░░░░░░░░░░ 0%
+
+**Current Step:** Parsing Requirements
+**Status:** ⏳ Starting
+**Elapsed:** 0s
+**ETA:** Calculating…
+
+-----
+
+*This message updates live - no need to refresh*`;
+
+```
+  const progressMessage = await this.discord.sendMessage(initialProgressMessage);
+  let deploymentId: string;
+  
+  // Start deployment with live progress updates to the SAME message
+  const deploymentResult = await this.liveDeployer.createAndDeployAgent(
+    request.description,
+    async (progress) => {
+      deploymentId = progress.deploymentId;
+      
+      // Store the message reference for this deployment
+      if (progressMessage && !this.progressMessages.has(deploymentId)) {
+        this.progressMessages.set(deploymentId, progressMessage);
+      }
+      
+      // Update the SAME message with new progress
+      await this.updateSingleProgressMessage(progress);
     }
-  } else if (successCount < totalFiles) {
-    console.warn("Partial success:", successCount + "/" + totalFiles, "files written");
+  );
+  
+  // Final completion - send as NEW message (so it stays visible)
+  if (deploymentResult.success) {
+    // Edit the progress message one final time to show completion
+    await this.finalizeProgressMessage(deploymentId!, deploymentResult);
     
-    return {
-      ready: true,
-      summary: "Agent " + agentSpec.name + " partially created (" + successCount + "/" + totalFiles + " files written)",
-      environmentVars: environmentVars.length > 0 ? environmentVars : undefined
-    };
+    // Send a separate completion summary message
+    return await this.voice.formatResponse(
+      `🎉 **Agent Deployment Complete!**
+```
+
+✅ **${deploymentResult.summary}**
+
+🚀 **Quick Access:**
+
+- **Agent URL:** ${deploymentResult.agentUrl}
+- **Discord Bot:** ${deploymentResult.discordSetup?.inviteUrl || ‘N/A’}
+- **Total Time:** ${deploymentResult.actualDeploymentTime}
+
+Your agent is live and ready to use!`,
+{ type: ‘creation’ }
+);
+
+```
   } else {
-    console.log("Agent created successfully:", agentSpec.name);
+    // Edit progress message to show failure
+    await this.finalizeProgressMessage(deploymentId!, deploymentResult);
     
-    return {
-      ready: true,
-      summary: "Agent " + agentSpec.name + " created successfully with all " + totalFiles + " files",
-      environmentVars: environmentVars.length > 0 ? environmentVars : undefined
-    };
-  }
+    return await this.voice.formatResponse(
+      `❌ **Deployment Failed**
+```
 
+**Error:** ${deploymentResult.error}
+**Failed At:** ${deploymentResult.failedAt}
+
+You can retry the deployment - all progress has been cleaned up.`,
+{ type: ‘error’ }
+);
+}
+
+```
 } catch (error) {
-  console.error("Failed to build agent:", error);
-  
-  return {
-    ready: false,
-    error: error instanceof Error ? error.message : "Unknown error during agent creation"
-  };
+  console.error('[ArchitectOrchestrator] Agent creation failed:', error);
+  return await this.voice.formatResponse(
+    `Agent creation failed: ${error instanceof Error ? error.message : String(error)}`, 
+    { type: 'error' }
+  );
 }
 ```
 
 }
 
-private async agentExists(name: string): Promise<boolean> {
-const agentDir = path.join(this.baseDir, “src”, “agents”, name.toLowerCase());
+private async updateSingleProgressMessage(progress: any): Promise<void> {
 try {
-await fs.promises.access(agentDir);
-return true;
-} catch {
-return false;
-}
-}
-
-private async writeAgentFiles(agentSpec: AgentSpec): Promise<Array<{success: boolean; path: string; error?: string}>> {
-const results = [];
-const agentDir = path.join(this.baseDir, “src”, “agents”, agentSpec.name.toLowerCase());
+const message = this.progressMessages.get(progress.deploymentId);
+if (!message) return;
 
 ```
-try {
-  await this.ensureDirectory(agentDir);
+  const elapsed = Date.now() - progress.startTime;
+  const eta = progress.estimatedCompletion ? 
+    this.formatDuration(Math.max(0, progress.estimatedCompletion - Date.now())) : 'Calculating...';
   
-  const files = this.generateAgentFiles(agentSpec);
+  const currentStep = progress.steps[progress.currentStep];
+  const progressBar = this.generateProgressBar(progress.overallProgress, 20);
   
-  for (const [relativePath, content] of Object.entries(files)) {
-    const fullPath = path.join(agentDir, relativePath);
-    const result = await this.writeFileWithVerification(fullPath, content);
-    results.push(result);
-  }
+  const updatedContent = `🚀 **Deploying ${progress.agentName}**
+```
 
+📊 **Progress**
+${progressBar} ${progress.overallProgress.toFixed(1)}%
+
+**Current Step:** ${currentStep?.name || ‘Unknown’}
+**Status:** ${this.getStatusEmoji(currentStep?.status)} ${currentStep?.status || ‘Unknown’}
+**Elapsed:** ${this.formatDuration(elapsed)}
+**ETA:** ${eta}
+
+**Recent Steps:**
+${this.generateStepList(progress)}
+
+-----
+
+*Live updates • Deployment ID: ${progress.deploymentId}*`;
+
+```
+  // Edit the existing message with new content
+  await message.edit(updatedContent);
+  
 } catch (error) {
-  console.error("Error writing agent files:", error);
-  results.push({
-    success: false,
-    path: agentDir,
-    error: error instanceof Error ? error.message : "Unknown error"
-  });
+  console.error('[ArchitectOrchestrator] Failed to update progress message:', error);
 }
-
-return results;
 ```
 
 }
 
-private async writeFileWithVerification(filePath: string, content: string): Promise<{success: boolean; path: string; error?: string}> {
+private async finalizeProgressMessage(deploymentId: string, result: any): Promise<void> {
 try {
-await this.ensureDirectory(path.dirname(filePath));
-await fs.promises.writeFile(filePath, content, “utf8”);
+const message = this.progressMessages.get(deploymentId);
+if (!message) return;
 
 ```
-  const stats = await fs.promises.stat(filePath);
-  const writtenContent = await fs.promises.readFile(filePath, "utf8");
+  let finalContent: string;
   
-  if (writtenContent.length !== content.length) {
-    throw new Error("Content verification failed: expected " + content.length + " chars, got " + writtenContent.length);
-  }
+  if (result.success) {
+    finalContent = `✅ **Agent Deployment Complete!**
+```
 
-  console.log("Successfully wrote", filePath, "(" + stats.size + " bytes)");
+🎉 **${result.summary}**
+
+📊 **Final Results**
+████████████████████ 100%
+
+**Total Time:** ${result.actualDeploymentTime}
+**Status:** ✅ Successfully Deployed
+**PR:** #${result.prNumber} (merged)
+**Agent URL:** ${result.agentUrl}
+
+**Performance Breakdown:**
+${result.timingBreakdown?.slice(0, 5).map((t: any) => `${this.getStatusEmoji(t.status)} ${t.step}: ${t.duration}`).join(’\n’)}
+
+-----
+
+✅ **Deployment Complete** • ID: ${deploymentId}`; } else { finalContent = `❌ **Deployment Failed**
+
+💥 **Error:** ${result.error}
+
+📊 **Progress Before Failure**
+${this.generateProgressBar(result.progress || 0, 20)} ${(result.progress || 0).toFixed(1)}%
+
+**Failed At:** ${result.failedAt}
+**Status:** ❌ Deployment Failed
+
+**Steps Completed:**
+${result.timingBreakdown?.filter((t: any) => t.status === ‘completed’).map((t: any) => `✅ ${t.step}: ${t.duration}`).join(’\n’) || ‘None’}
+
+-----
+
+❌ **Deployment Failed** • ID: ${deploymentId}`;
+}
+
+```
+  await message.edit(finalContent);
   
-  return {
-    success: true,
-    path: filePath
-  };
-
+  // Clean up the reference
+  this.progressMessages.delete(deploymentId);
+  
 } catch (error) {
-  const errorMsg = error instanceof Error ? error.message : "Unknown error";
-  console.error("Failed to write", filePath + ":", errorMsg);
+  console.error('[ArchitectOrchestrator] Failed to finalize progress message:', error);
+}
+```
+
+}
+
+private generateProgressBar(progress: number, length: number = 20): string {
+const filled = Math.round((progress / 100) * length);
+const empty = length - filled;
+return ‘█’.repeat(filled) + ‘░’.repeat(empty);
+}
+
+private generateStepList(progress: any): string {
+const steps = progress.steps;
+const current = progress.currentStep;
+
+```
+// Show 2 completed steps before current, current step, and 2 upcoming steps
+const start = Math.max(0, current - 2);
+const end = Math.min(steps.length, current + 3);
+
+let stepList = '';
+for (let i = start; i < end; i++) {
+  const step = steps[i];
+  const emoji = this.getStatusEmoji(step.status);
+  const isCurrent = i === current;
+  const arrow = isCurrent ? ' ← **Current**' : '';
   
-  return {
-    success: false,
-    path: filePath,
-    error: errorMsg
-  };
+  stepList += `${emoji} ${step.name}${arrow}\n`;
 }
+
+return stepList.trim();
 ```
 
 }
 
-private async ensureDirectory(dirPath: string): Promise<void> {
+private getStatusEmoji(status?: string): string {
+switch (status) {
+case ‘completed’: return ‘✅’;
+case ‘running’: return ‘⏳’;
+case ‘failed’: return ‘❌’;
+case ‘pending’: return ‘⏸️’;
+default: return ‘❓’;
+}
+}
+
+private formatDuration(ms: number): string {
+if (ms < 1000) return `${Math.round(ms)}ms`;
+if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+}
+
+// Enhanced Discord class to support message editing
+private async editProgressMessage(messageId: string, content: string): Promise<void> {
 try {
-await fs.promises.access(dirPath);
-} catch {
-try {
-await fs.promises.mkdir(dirPath, { recursive: true });
-console.log(“Created directory:”, dirPath);
+await this.discord.editMessage(messageId, content);
 } catch (error) {
-const errorMsg = error instanceof Error ? error.message : “Unknown error”;
-console.error(“Failed to create directory”, dirPath + “:”, errorMsg);
-throw error;
+console.error(’[ArchitectOrchestrator] Failed to edit message:’, error);
 }
-}
-}
-
-private generateAgentFiles(agentSpec: AgentSpec): Record<string, string> {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return {
-  [className + ".ts"]: this.generateMainAgentFile(agentSpec),
-  ["communication/" + className + "Discord.ts"]: this.generateDiscordFile(agentSpec),
-  ["core/" + className + "Core.ts"]: this.generateCoreFile(agentSpec),
-  ["intelligence/" + className + "Watcher.ts"]: this.generateWatcherFile(agentSpec),
-  "index.ts": this.generateIndexFile(agentSpec),
-  "README.md": this.generateReadmeFile(agentSpec)
-};
-```
-
-}
-
-private generateMainAgentFile(agentSpec: AgentSpec): string {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return "import { " + className + "Core } from './core/" + className + "Core';\n" +
-       "import { " + className + "Discord } from './communication/" + className + "Discord';\n" +
-       "import { " + className + "Watcher } from './intelligence/" + className + "Watcher';\n" +
-       "\n" +
-       "/**\n" +
-       " * " + agentSpec.description + "\n" +
-       " * Generated by AgentBuilder on " + new Date().toISOString() + "\n" +
-       " */\n" +
-       "export class " + className + " {\n" +
-       "  private core: " + className + "Core;\n" +
-       "  private discord?: " + className + "Discord;\n" +
-       "  private watcher?: " + className + "Watcher;\n" +
-       "\n" +
-       "  constructor() {\n" +
-       "    this.core = new " + className + "Core();\n" +
-       (agentSpec.discordEnabled ? 
-       "    if (process.env." + agentSpec.name.toUpperCase() + "_DISCORD_TOKEN) {\n" +
-       "      this.discord = new " + className + "Discord(this.core);\n" +
-       "    }\n" : "") +
-       (agentSpec.watcherEnabled ? 
-       "    this.watcher = new " + className + "Watcher(this.core);\n" : "") +
-       "  }\n" +
-       "\n" +
-       "  async initialize(): Promise<void> {\n" +
-       "    console.log('[" + className + "] Initializing...');\n" +
-       "    await this.core.initialize();\n" +
-       "    if (this.discord) await this.discord.initialize();\n" +
-       "    if (this.watcher) await this.watcher.initialize();\n" +
-       "    console.log('[" + className + "] Agent initialized successfully');\n" +
-       "  }\n" +
-       "\n" +
-       "  async process(input: string): Promise<string> {\n" +
-       "    return await this.core.process(input);\n" +
-       "  }\n" +
-       "\n" +
-       "  async shutdown(): Promise<void> {\n" +
-       "    console.log('[" + className + "] Shutting down...');\n" +
-       "    if (this.watcher) await this.watcher.shutdown();\n" +
-       "    if (this.discord) await this.discord.shutdown();\n" +
-       "    await this.core.shutdown();\n" +
-       "  }\n" +
-       "}\n";
-```
-
-}
-
-private generateDiscordFile(agentSpec: AgentSpec): string {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return "import { Client, GatewayIntentBits, Message } from 'discord.js';\n" +
-       "import { " + className + "Core } from '../core/" + className + "Core';\n" +
-       "\n" +
-       "export class " + className + "Discord {\n" +
-       "  private client: Client;\n" +
-       "  private core: " + className + "Core;\n" +
-       "  private token?: string;\n" +
-       "\n" +
-       "  constructor(core: " + className + "Core) {\n" +
-       "    this.core = core;\n" +
-       "    this.token = process.env." + agentSpec.name.toUpperCase() + "_DISCORD_TOKEN;\n" +
-       "    this.client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });\n" +
-       "  }\n" +
-       "\n" +
-       "  async initialize(): Promise<void> {\n" +
-       "    if (!this.token) {\n" +
-       "      console.log('[" + className + "Discord] No token provided, skipping Discord integration');\n" +
-       "      return;\n" +
-       "    }\n" +
-       "    this.client.on('ready', () => console.log('[" + className + "Discord] Logged in'));\n" +
-       "    this.client.on('messageCreate', async (message: Message) => {\n" +
-       "      if (message.author.bot) return;\n" +
-       "      if (message.mentions.has(this.client.user!) || message.content.startsWith('/" + agentSpec.name.toLowerCase() + "')) {\n" +
-       "        try {\n" +
-       "          const response = await this.core.process(message.content);\n" +
-       "          await message.reply(response);\n" +
-       "        } catch (error) {\n" +
-       "          console.error('[" + className + "Discord] Error:', error);\n" +
-       "          await message.reply('Sorry, I encountered an error.');\n" +
-       "        }\n" +
-       "      }\n" +
-       "    });\n" +
-       "    await this.client.login(this.token);\n" +
-       "  }\n" +
-       "\n" +
-       "  async shutdown(): Promise<void> {\n" +
-       "    if (this.client) await this.client.destroy();\n" +
-       "  }\n" +
-       "}\n";
-```
-
-}
-
-private generateCoreFile(agentSpec: AgentSpec): string {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return "/**\n" +
-       " * Core logic for " + agentSpec.name + "\n" +
-       " * " + agentSpec.description + "\n" +
-       " */\n" +
-       "export class " + className + "Core {\n" +
-       "  private capabilities: string[];\n" +
-       "\n" +
-       "  constructor() {\n" +
-       "    this.capabilities = " + JSON.stringify(agentSpec.capabilities) + ";\n" +
-       "  }\n" +
-       "\n" +
-       "  async initialize(): Promise<void> {\n" +
-       "    console.log('[" + className + "Core] Initializing core functionality...');\n" +
-       "  }\n" +
-       "\n" +
-       "  async process(input: string): Promise<string> {\n" +
-       "    console.log('[" + className + "Core] Processing:', input.substring(0, 50) + '...');\n" +
-       "    return '" + className + " processed: ' + input;\n" +
-       "  }\n" +
-       "\n" +
-       "  getCapabilities(): string[] {\n" +
-       "    return [...this.capabilities];\n" +
-       "  }\n" +
-       "\n" +
-       "  async shutdown(): Promise<void> {\n" +
-       "    console.log('[" + className + "Core] Shutting down core...');\n" +
-       "  }\n" +
-       "}\n";
-```
-
-}
-
-private generateWatcherFile(agentSpec: AgentSpec): string {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return "import { " + className + "Core } from '../core/" + className + "Core';\n" +
-       "\n" +
-       "export class " + className + "Watcher {\n" +
-       "  private core: " + className + "Core;\n" +
-       "  private isWatching: boolean = false;\n" +
-       "\n" +
-       "  constructor(core: " + className + "Core) {\n" +
-       "    this.core = core;\n" +
-       "  }\n" +
-       "\n" +
-       "  async initialize(): Promise<void> {\n" +
-       "    console.log('[" + className + "Watcher] Initializing watcher...');\n" +
-       "    this.isWatching = true;\n" +
-       "    this.startWatching();\n" +
-       "  }\n" +
-       "\n" +
-       "  private startWatching(): void {\n" +
-       "    setInterval(() => {\n" +
-       "      if (this.isWatching) {\n" +
-       "        console.log('[" + className + "Watcher] Periodic check');\n" +
-       "      }\n" +
-       "    }, 60000);\n" +
-       "  }\n" +
-       "\n" +
-       "  async shutdown(): Promise<void> {\n" +
-       "    console.log('[" + className + "Watcher] Shutting down watcher...');\n" +
-       "    this.isWatching = false;\n" +
-       "  }\n" +
-       "}\n";
-```
-
-}
-
-private generateIndexFile(agentSpec: AgentSpec): string {
-const className = agentSpec.name.charAt(0).toUpperCase() + agentSpec.name.slice(1);
-
-```
-return "export { " + className + " } from './" + className + "';\n" +
-       "export { " + className + "Core } from './core/" + className + "Core';\n" +
-       "export { " + className + "Discord } from './communication/" + className + "Discord';\n" +
-       "export { " + className + "Watcher } from './intelligence/" + className + "Watcher';\n";
-```
-
-}
-
-private generateReadmeFile(agentSpec: AgentSpec): string {
-return “# “ + agentSpec.name + “\n\n” +
-agentSpec.description + “\n\n” +
-“## Features\n\n” +
-agentSpec.capabilities.map(cap => “- “ + cap).join(”\n”) + “\n\n” +
-“## Configuration\n\n” +
-“### Environment Variables\n\n” +
-“- `" + agentSpec.name.toUpperCase() + "_DISCORD_TOKEN`: Discord bot token (optional)\n\n” +
-“## Generated\n\n” +
-“This agent was generated by AgentBuilder on “ + new Date().toISOString() + “.\n”;
-}
-
-private inferCapabilities(description: string): string[] {
-const capabilities: string[] = [];
-const desc = description.toLowerCase();
-
-```
-if (desc.includes("storage") || desc.includes("persist")) {
-  capabilities.push("Data Storage");
-}
-if (desc.includes("queue") || desc.includes("task")) {
-  capabilities.push("Task Management");
-}
-if (desc.includes("discord") || desc.includes("chat")) {
-  capabilities.push("Discord Integration");
-}
-if (desc.includes("analysis") || desc.includes("analyze")) {
-  capabilities.push("Data Analysis");
-}
-if (desc.includes("monitor") || desc.includes("watch")) {
-  capabilities.push("System Monitoring");
-}
-if (desc.includes("test") || desc.includes("verify")) {
-  capabilities.push("Testing & Verification");
-}
-
-if (capabilities.length === 0) {
-  capabilities.push("General Purpose Processing");
-}
-
-return capabilities;
-```
-
-}
-
-getStoredAgents(): AgentSpec[] {
-return [];
-}
-
-getAgentConfig(name: string): AgentSpec | undefined {
-return undefined;
 }
 }

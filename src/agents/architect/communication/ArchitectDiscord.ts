@@ -31,9 +31,11 @@ export class ArchitectDiscord {
       
       if (this.architectChannel) {
         console.log(`[ArchitectDiscord] Channel found: #${this.architectChannel.name}`);
+        
+        // Send startup message with command help
+        await this.sendStartupMessage();
       } else {
-        console.error(`[ArchitectDiscord] Channel not found! ID: ${this.config.architectChannelId}`);
-        console.log(`[ArchitectDiscord] Available channels:`, this.client.channels.cache.map(c => `${c.id} (#${(c as TextChannel).name})`));
+        console.log(`[ArchitectDiscord] Channel not in cache, fetching from API...`);
         
         // Try to fetch the channel directly from the API
         try {
@@ -41,6 +43,7 @@ export class ArchitectDiscord {
           if (channel && channel.isTextBased()) {
             this.architectChannel = channel as TextChannel;
             console.log(`[ArchitectDiscord] Channel fetched from API: #${this.architectChannel.name}`);
+            await this.sendStartupMessage();
           }
         } catch (fetchError) {
           console.error(`[ArchitectDiscord] Failed to fetch channel from API:`, fetchError);
@@ -49,7 +52,7 @@ export class ArchitectDiscord {
       }
       
       this.client.user?.setPresence({
-        activities: [{ name: 'Building Systems', type: 3 }],
+        activities: [{ name: 'Building Systems | /help', type: 3 }],
         status: 'online'
       });
     });
@@ -57,6 +60,9 @@ export class ArchitectDiscord {
     this.client.on('messageCreate', async (message) => {
       if (message.author.bot) return;
       if (message.channelId !== this.config.architectChannelId) return;
+      
+      // Show typing indicator for command processing
+      await message.channel.sendTyping();
       
       for (const handler of this.messageHandlers) {
         await handler(message);
@@ -66,6 +72,26 @@ export class ArchitectDiscord {
     this.client.on('error', (error) => {
       console.error('[ArchitectDiscord] Client error:', error);
     });
+  }
+
+  private async sendStartupMessage(): Promise<void> {
+    if (!this.architectChannel) return;
+    
+    try {
+      const embed = new EmbedBuilder()
+        .setTitle('🏗️ Architect Online')
+        .setDescription('System architecture agent ready for commands')
+        .setColor(0x3498db)
+        .addFields(
+          { name: '⚡ Quick Start', value: 'Type `/help` for commands\nUse natural language or slash commands', inline: false },
+          { name: '🔧 Examples', value: '`/status` - System health\n`/analyze` - Code analysis\n`/build agent Monitor` - Create agent', inline: false }
+        )
+        .setTimestamp();
+      
+      await this.architectChannel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ArchitectDiscord] Failed to send startup message:', error);
+    }
   }
 
   onMessage(handler: (message: Message) => Promise<void>): void {
@@ -79,6 +105,18 @@ export class ArchitectDiscord {
     }
     
     try {
+      // Split long messages to avoid Discord's 2000 character limit
+      if (content.length > 2000) {
+        const chunks = this.splitMessage(content, 2000);
+        let lastMessage: Message | null = null;
+        
+        for (const chunk of chunks) {
+          lastMessage = await this.architectChannel.send(chunk);
+        }
+        
+        return lastMessage;
+      }
+      
       return await this.architectChannel.send(content);
     } catch (error) {
       console.error('[ArchitectDiscord] Failed to send message:', error);
@@ -104,6 +142,30 @@ export class ArchitectDiscord {
       console.error('[ArchitectDiscord] Failed to send embed:', error);
       return null;
     }
+  }
+
+  private splitMessage(text: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+    let currentChunk = '';
+    
+    const lines = text.split('\n');
+    
+    for (const line of lines) {
+      if (currentChunk.length + line.length + 1 > maxLength) {
+        if (currentChunk.trim()) {
+          chunks.push(currentChunk.trim());
+        }
+        currentChunk = line;
+      } else {
+        currentChunk += (currentChunk ? '\n' : '') + line;
+      }
+    }
+    
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
   }
 
   async start(): Promise<void> {

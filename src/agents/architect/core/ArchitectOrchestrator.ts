@@ -1,7 +1,7 @@
 import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
 import { CodeModifier } from '../operations/CodeModifier.js';
-import { AgentBuilder } from '../operations/AgentBuilder.js';
+import { agentBuilder } from '../operations/AgentBuilder.js'; // Use the fixed singleton
 import { SystemRefiner } from '../operations/SystemRefiner.js';
 import { ArchitectVoice } from '../communication/ArchitectVoice.js';
 import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
@@ -10,7 +10,6 @@ import { DiscordBotCreator } from '../operations/DiscordBotCreator.js';
 export class ArchitectOrchestrator {
   private codeAnalyzer: CodeAnalyzer;
   private modifier: CodeModifier;
-  private builder: AgentBuilder;
   private refiner: SystemRefiner;
   private voice: ArchitectVoice;
   private intelligence: CodeIntelligence;
@@ -23,7 +22,6 @@ export class ArchitectOrchestrator {
   constructor(config: ArchitectConfig) {
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
-    this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);
     this.refiner = new SystemRefiner(config.claudeApiKey);
     this.voice = new ArchitectVoice(config.claudeApiKey);
     this.intelligence = new CodeIntelligence(config.claudeApiKey);
@@ -71,6 +69,18 @@ export class ArchitectOrchestrator {
       default:
         return await this.voice.formatResponse("Request type not recognized. Please specify what you'd like me to analyze, modify, or build.", { type: 'error' });
     }
+  }
+
+  // Maintain backward compatibility - wrapper for existing callers
+  async executeOperation(operation: string, request: string): Promise<string> {
+    const architecturalRequest: ArchitecturalRequest = {
+      type: operation as any,
+      description: request,
+      priority: 'medium',
+      timestamp: new Date()
+    };
+    
+    return await this.executeArchitecturalWork(architecturalRequest);
   }
 
   private async handleApproval(request: ArchitecturalRequest): Promise<string> {
@@ -142,16 +152,45 @@ Health: ${analysis.healthScore}%`;
   private async handleAgentCreation(request: ArchitecturalRequest): Promise<string> {
     console.log(`[ArchitectOrchestrator] Creating agent from request: ${request.description}`);
     
-    const agentSpec = await this.builder.parseAgentRequirements(request.description);
-    const buildResult = await this.builder.generateAgent(agentSpec);
-    
-    if (buildResult.ready) {
-      const envVars = buildResult.environmentVars ? 
-        `\n\nTo complete setup:\n${buildResult.environmentVars.map((v: string) => `railway variables --set ${v}=your_token_here`).join('\n')}` : '';
+    try {
+      // Use the fixed AgentBuilder
+      const success = await agentBuilder.buildCompleteAgent(request.description);
       
-      return await this.voice.formatResponse(`Agent ${agentSpec.name} created successfully. ${buildResult.summary}.${envVars}`, { type: 'creation' });
-    } else {
-      return await this.voice.formatResponse(`Agent creation failed: ${buildResult.error}`, { type: 'error' });
+      if (success) {
+        const config = agentBuilder.parseRequirements(request.description);
+        const storedAgents = agentBuilder.getStoredAgents();
+        
+        // Check if environment variables are needed
+        const envVars = config.discordEnabled ? 
+          [`${config.name.toUpperCase()}_DISCORD_TOKEN`] : [];
+        
+        const envVarInstructions = envVars.length > 0 ? 
+          `\n\nTo complete setup:\n${envVars.map(v => `railway variables --set ${v}=your_token_here`).join('\n')}` : '';
+        
+        const summary = `Agent ${config.name} created successfully. Files generated: ${Object.keys({
+          [`${config.name}.ts`]: '',
+          [`communication/${config.name}Discord.ts`]: '',
+          [`core/${config.name}Core.ts`]: '',
+          [`intelligence/${config.name}Watcher.ts`]: '',
+          'index.ts': '',
+          'README.md': ''
+        }).length}.${envVarInstructions}`;
+        
+        return await this.voice.formatResponse(summary, { type: 'creation' });
+      } else {
+        // Partial success - agent in memory but files may have failed
+        const config = agentBuilder.parseRequirements(request.description);
+        const isRailway = process.env.RAILWAY_ENVIRONMENT === 'production';
+        
+        const message = `Agent ${config.name} partially created. ${isRailway ? 
+          'Files are ephemeral on Railway but agent is functional in memory.' : 
+          'Some file operations failed. Check permissions and disk space.'}`;
+        
+        return await this.voice.formatResponse(message, { type: 'creation' });
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return await this.voice.formatResponse(`Agent creation failed: ${errorMsg}`, { type: 'error' });
     }
   }
 
@@ -162,7 +201,13 @@ Health: ${analysis.healthScore}%`;
 
   private async handleSystemStatus(request: ArchitecturalRequest): Promise<string> {
     const status = await this.codeAnalyzer.getSystemHealth();
-    return await this.voice.formatResponse(`System status: ${status.summary}. ${status.issues.length > 0 ? 'Issues: ' + status.issues.join(', ') : 'All systems operational.'}`, { type: 'status' });
+    const agents = agentBuilder.getStoredAgents();
+    
+    const agentStatus = agents.length > 0 ? 
+      ` Active agents: ${agents.length} (${agents.map(a => a.name).join(', ')}).` : 
+      ' No agents in memory.';
+    
+    return await this.voice.formatResponse(`System status: ${status.summary}. ${status.issues.length > 0 ? 'Issues: ' + status.issues.join(', ') : 'All systems operational.'}${agentStatus}`, { type: 'status' });
   }
 
   private async handleDiscordBotSetup(request: ArchitecturalRequest): Promise<string> {
@@ -178,10 +223,15 @@ Health: ${analysis.healthScore}%`;
       return await this.voice.formatResponse("Could not identify agent name. Please specify which agent needs Discord setup (e.g., 'Set up Discord bot for Dashboard agent')", { type: 'error' });
     }
     
-    // Check if agent exists in codebase
+    // Check if agent exists in codebase or memory
     const agentExists = await this.checkAgentExists(agentName);
     if (!agentExists) {
-      return await this.voice.formatResponse(`Agent '${agentName}' not found in codebase. Available agents: Commander, Architect, Dashboard`, { type: 'error' });
+      // Check in memory (AgentBuilder's stored agents)
+      const storedAgent = agentBuilder.getAgentConfig(agentName);
+      if (!storedAgent) {
+        const availableAgents = agentBuilder.getStoredAgents().map(a => a.name).join(', ') || 'None';
+        return await this.voice.formatResponse(`Agent '${agentName}' not found in codebase or memory. Available agents: ${availableAgents}`, { type: 'error' });
+      }
     }
     
     try {
@@ -334,5 +384,28 @@ Setup complete!`;
       // Fall back to standard processing
       return await this.handleCodeAnalysis(request);
     }
+  }
+
+  // Wrapper methods for backward compatibility
+  async createAgent(request: string): Promise<string> {
+    const architecturalRequest: ArchitecturalRequest = {
+      type: 'agent-creation',
+      description: request,
+      priority: 'medium',
+      timestamp: new Date()
+    };
+    
+    return await this.handleAgentCreation(architecturalRequest);
+  }
+
+  async getSystemStatus(): Promise<string> {
+    const architecturalRequest: ArchitecturalRequest = {
+      type: 'system-status',
+      description: 'Get system status',
+      priority: 'low',
+      timestamp: new Date()
+    };
+    
+    return await this.handleSystemStatus(architecturalRequest);
   }
 }

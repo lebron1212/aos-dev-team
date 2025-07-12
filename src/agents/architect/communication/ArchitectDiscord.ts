@@ -1,12 +1,13 @@
-import { Client, GatewayIntentBits, TextChannel, Message } from ‘discord.js’;
+import { Client, GatewayIntentBits, TextChannel, EmbedBuilder, Message } from ‘discord.js’;
+import { ArchitectConfig } from ‘../types/index.js’;
 
 export class ArchitectDiscord {
 private client: Client;
-private channel: TextChannel | null = null;
-private config: any;
+private architectChannel: TextChannel | null = null;
+private config: ArchitectConfig;
 private messageHandlers: Array<(message: Message) => Promise<void>> = [];
 
-constructor(config: any) {
+constructor(config: ArchitectConfig) {
 this.config = config;
 this.client = new Client({
 intents: [
@@ -25,11 +26,11 @@ this.setupEventHandlers();
 private setupEventHandlers(): void {
 this.client.once(‘ready’, async () => {
 console.log(`[ArchitectDiscord] Connected as ${this.client.user?.tag}`);
-this.channel = this.client.channels.cache.get(this.config.architectChannelId) as TextChannel;
+this.architectChannel = this.client.channels.cache.get(this.config.architectChannelId) as TextChannel;
 
 ```
   this.client.user?.setPresence({
-    activities: [{ name: 'Building and deploying agents', type: 3 }],
+    activities: [{ name: 'Building Systems', type: 3 }],
     status: 'online'
   });
 });
@@ -55,14 +56,14 @@ this.messageHandlers.push(handler);
 }
 
 async sendMessage(content: string): Promise<Message | null> {
-if (!this.channel) {
+if (!this.architectChannel) {
 console.error(’[ArchitectDiscord] Channel not available’);
 return null;
 }
 
 ```
 try {
-  const message = await this.channel.send(content);
+  const message = await this.architectChannel.send(content);
   console.log(`[ArchitectDiscord] Sent message: ${message.id}`);
   return message;
 } catch (error) {
@@ -73,21 +74,18 @@ try {
 
 }
 
-// NEW: Edit an existing message
 async editMessage(messageOrId: Message | string, newContent: string): Promise<Message | null> {
 try {
 let message: Message;
 
 ```
   if (typeof messageOrId === 'string') {
-    // If we got a message ID, fetch the message first
-    if (!this.channel) {
+    if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for message editing');
       return null;
     }
-    message = await this.channel.messages.fetch(messageOrId);
+    message = await this.architectChannel.messages.fetch(messageOrId);
   } else {
-    // If we got a Message object, use it directly
     message = messageOrId;
   }
   
@@ -103,18 +101,17 @@ let message: Message;
 
 }
 
-// NEW: Delete a message
 async deleteMessage(messageOrId: Message | string): Promise<boolean> {
 try {
 let message: Message;
 
 ```
   if (typeof messageOrId === 'string') {
-    if (!this.channel) {
+    if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for message deletion');
       return false;
     }
-    message = await this.channel.messages.fetch(messageOrId);
+    message = await this.architectChannel.messages.fetch(messageOrId);
   } else {
     message = messageOrId;
   }
@@ -131,18 +128,17 @@ let message: Message;
 
 }
 
-// NEW: Add reaction to a message
 async addReaction(messageOrId: Message | string, emoji: string): Promise<boolean> {
 try {
 let message: Message;
 
 ```
   if (typeof messageOrId === 'string') {
-    if (!this.channel) {
+    if (!this.architectChannel) {
       console.error('[ArchitectDiscord] Channel not available for reaction');
       return false;
     }
-    message = await this.channel.messages.fetch(messageOrId);
+    message = await this.architectChannel.messages.fetch(messageOrId);
   } else {
     message = messageOrId;
   }
@@ -159,25 +155,29 @@ let message: Message;
 
 }
 
-// NEW: Send a message and then edit it (useful for immediate feedback)
-async sendAndEditMessage(initialContent: string, finalContent: string, delay: number = 1000): Promise<Message | null> {
-const message = await this.sendMessage(initialContent);
-if (!message) return null;
+async sendEmbed(title: string, description: string, color: number = 0x3498db): Promise<Message | null> {
+if (!this.architectChannel) return null;
 
 ```
-setTimeout(async () => {
-  await this.editMessage(message, finalContent);
-}, delay);
+const embed = new EmbedBuilder()
+  .setTitle(title)
+  .setDescription(description)
+  .setColor(color)
+  .setTimestamp();
 
-return message;
+try {
+  return await this.architectChannel.send({ embeds: [embed] });
+} catch (error) {
+  console.error('[ArchitectDiscord] Failed to send embed:', error);
+  return null;
+}
 ```
 
 }
 
-// NEW: Send a typing indicator
 async startTyping(): Promise<void> {
-if (this.channel) {
-await this.channel.sendTyping();
+if (this.architectChannel) {
+await this.architectChannel.sendTyping();
 }
 }
 
@@ -190,21 +190,19 @@ return this.client.isReady();
 }
 
 get channelId(): string | null {
-return this.channel?.id || null;
+return this.architectChannel?.id || null;
 }
 
-// Utility: Get message by ID
 async getMessage(messageId: string): Promise<Message | null> {
 try {
-if (!this.channel) return null;
-return await this.channel.messages.fetch(messageId);
+if (!this.architectChannel) return null;
+return await this.architectChannel.messages.fetch(messageId);
 } catch (error) {
 console.error(’[ArchitectDiscord] Failed to fetch message:’, error);
 return null;
 }
 }
 
-// Utility: Check if bot can edit a message (must be bot’s own message)
 canEditMessage(message: Message): boolean {
 return message.author.id === this.client.user?.id;
 }

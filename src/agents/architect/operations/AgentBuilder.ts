@@ -20,8 +20,8 @@ private async handleAgentCreation(request: ArchitecturalRequest): Promise<string
 console.log(`[ArchitectOrchestrator] Starting live tracked deployment: ${request.description}`);
 
 try {
-// Send ONE initial progress message that we'll keep updating
-const initialProgressMessage = `LAUNCH - Starting Agent Deployment
+  // Send ONE initial progress message that we'll keep updating
+  const initialProgressMessage = `LAUNCH - Starting Agent Deployment
 
 Initializing deployment pipeline…
 
@@ -31,44 +31,39 @@ Progress:
 Current Step: Parsing Requirements
 Status: Starting
 Elapsed: 0s
-ETA: Calculating…
+ETA: Calculating...
 
 -----
 
 This message updates live - no need to refresh`;
 
-const progressMessage = await this.discord.sendMessage(initialProgressMessage);
-let deploymentId: string;
-
-// Start deployment with live progress updates to the SAME message
-const deploymentResult = await this.liveDeployer.createAndDeployAgent(
-request.description,
-async (progress) => {
-deploymentId = progress.deploymentId;
-
-```
-  // Store the message reference for this deployment
-  if (progressMessage && !this.progressMessages.has(deploymentId)) {
-    this.progressMessages.set(deploymentId, progressMessage);
-  }
+  const progressMessage = await this.discord.sendMessage(initialProgressMessage);
+  let deploymentId: string;
   
-  // Update the SAME message with new progress
-  await this.updateSingleProgressMessage(progress);
-}
-```
-
-);
-
-// Final completion - send as NEW message (so it stays visible)
-if (deploymentResult.success) {
-// Edit the progress message one final time to show completion
-await this.finalizeProgressMessage(deploymentId!, deploymentResult);
-
-```
-// Send a separate completion summary message
-return await this.voice.formatResponse(
-  `SUCCESS - Agent Deployment Complete!
-```
+  // Start deployment with live progress updates to the SAME message
+  const deploymentResult = await this.liveDeployer.createAndDeployAgent(
+    request.description,
+    async (progress) => {
+      deploymentId = progress.deploymentId;
+      
+      // Store the message reference for this deployment
+      if (progressMessage && !this.progressMessages.has(deploymentId)) {
+        this.progressMessages.set(deploymentId, progressMessage);
+      }
+      
+      // Update the SAME message with new progress
+      await this.updateSingleProgressMessage(progress);
+    }
+  );
+  
+  // Final completion - send as NEW message (so it stays visible)
+  if (deploymentResult.success) {
+    // Edit the progress message one final time to show completion
+    await this.finalizeProgressMessage(deploymentId!, deploymentResult);
+    
+    // Send a separate completion summary message
+    return await this.voice.formatResponse(
+      `SUCCESS - Agent Deployment Complete!
 
 ${deploymentResult.summary}
 
@@ -79,32 +74,30 @@ Quick Access:
 - Total Time: ${deploymentResult.actualDeploymentTime}
 
 Your agent is live and ready to use!`,
-{ type: 'creation' }
-);
+      { type: 'creation' }
+    );
 
-} else {
-// Edit progress message to show failure
-await this.finalizeProgressMessage(deploymentId!, deploymentResult);
-
-```
-return await this.voice.formatResponse(
-  `ERROR - Deployment Failed
-```
+  } else {
+    // Edit progress message to show failure
+    await this.finalizeProgressMessage(deploymentId!, deploymentResult);
+    
+    return await this.voice.formatResponse(
+      `ERROR - Deployment Failed
 
 Error: ${deploymentResult.error}
 Failed At: ${deploymentResult.failedAt}
 
 You can retry the deployment - all progress has been cleaned up.`,
-{ type: 'error' }
-);
-}
+      { type: 'error' }
+    );
+  }
 
 } catch (error) {
-console.error("[ArchitectOrchestrator] Agent creation failed:", error);
-return await this.voice.formatResponse(
-`Agent creation failed: ${error instanceof Error ? error.message : String(error)}`,
-{ type: "error" }
-);
+  console.error("[ArchitectOrchestrator] Agent creation failed:", error);
+  return await this.voice.formatResponse(
+    `Agent creation failed: ${error instanceof Error ? error.message : String(error)}`, 
+    { type: "error" }
+  );
 }
 
 }
@@ -114,14 +107,14 @@ try {
 const message = this.progressMessages.get(progress.deploymentId);
 if (!message) return;
 
-const elapsed = Date.now() - progress.startTime;
-const eta = progress.estimatedCompletion ?
-this.formatDuration(Math.max(0, progress.estimatedCompletion - Date.now())) : "Calculating…";
-
-const currentStep = progress.steps[progress.currentStep];
-const progressBar = this.generateProgressBar(progress.overallProgress, 20);
-
-const updatedContent = `LAUNCH - Deploying ${progress.agentName}
+  const elapsed = Date.now() - progress.startTime;
+  const eta = progress.estimatedCompletion ? 
+    this.formatDuration(Math.max(0, progress.estimatedCompletion - Date.now())) : "Calculating...";
+  
+  const currentStep = progress.steps[progress.currentStep];
+  const progressBar = this.generateProgressBar(progress.overallProgress, 20);
+  
+  const updatedContent = `LAUNCH - Deploying ${progress.agentName}
 
 Progress:
 ${progressBar} ${progress.overallProgress.toFixed(1)}%
@@ -138,11 +131,11 @@ ${this.generateStepList(progress)}
 
 Live updates • Deployment ID: ${progress.deploymentId}`;
 
-// Edit the existing message with new content
-await message.edit(updatedContent);
-
+  // Edit the existing message with new content
+  await message.edit(updatedContent);
+  
 } catch (error) {
-console.error("[ArchitectOrchestrator] Failed to update progress message:", error);
+  console.error("[ArchitectOrchestrator] Failed to update progress message:", error);
 }
 
 }
@@ -152,10 +145,10 @@ try {
 const message = this.progressMessages.get(deploymentId);
 if (!message) return;
 
-let finalContent: string;
-
-if (result.success) {
-finalContent = `SUCCESS - Agent Deployment Complete!
+  let finalContent: string;
+  
+  if (result.success) {
+    finalContent = `SUCCESS - Agent Deployment Complete!
 
 ${result.summary}
 
@@ -172,7 +165,9 @@ ${result.timingBreakdown?.slice(0, 5).map((t: any) => `${this.getStatusEmoji(t.s
 
 -----
 
-Deployment Complete • ID: ${deploymentId}`; } else { finalContent = `ERROR - Deployment Failed
+Deployment Complete • ID: ${deploymentId}`;
+  } else {
+    finalContent = `ERROR - Deployment Failed
 
 Error: ${result.error}
 
@@ -188,15 +183,15 @@ ${result.timingBreakdown?.filter((t: any) => t.status === 'completed').map((t: a
 -----
 
 Deployment Failed • ID: ${deploymentId}`;
-}
+  }
 
-await message.edit(finalContent);
-
-// Clean up the reference
-this.progressMessages.delete(deploymentId);
-
+  await message.edit(finalContent);
+  
+  // Clean up the reference
+  this.progressMessages.delete(deploymentId);
+  
 } catch (error) {
-console.error("[ArchitectOrchestrator] Failed to finalize progress message:", error);
+  console.error("[ArchitectOrchestrator] Failed to finalize progress message:", error);
 }
 
 }
@@ -217,12 +212,12 @@ const end = Math.min(steps.length, current + 3);
 
 let stepList = "";
 for (let i = start; i < end; i++) {
-const step = steps[i];
-const emoji = this.getStatusEmoji(step.status);
-const isCurrent = i === current;
-const arrow = isCurrent ? " ← Current" : "";
-
-stepList += `${emoji} ${step.name}${arrow}\n`;
+  const step = steps[i];
+  const emoji = this.getStatusEmoji(step.status);
+  const isCurrent = i === current;
+  const arrow = isCurrent ? " ← Current" : "";
+  
+  stepList += `${emoji} ${step.name}${arrow}\n`;
 }
 
 return stepList.trim();

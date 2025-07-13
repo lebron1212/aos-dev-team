@@ -177,7 +177,7 @@ export class CodeModifier {
         .join('\n\n');
 
       const response = await this.claude.messages.create({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-3-haiku-20240307', // Fixed: Use correct model name
         max_tokens: 2000,
         messages: [{
           role: 'user',
@@ -294,7 +294,7 @@ CRITICAL: Respond with ONLY valid JSON. No explanatory text before or after.
       
       // Use Claude to generate the modified version
       const response = await this.claude.messages.create({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-3-haiku-20240307', // Fixed: Use correct model name
         max_tokens: 3000,
         messages: [{
           role: 'user',
@@ -331,7 +331,7 @@ Return the complete modified file content. Maintain all existing functionality w
     try {
       // Use Claude to generate appropriate file content
       const response = await this.claude.messages.create({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-3-haiku-20240307', // Fixed: Use correct model name
         max_tokens: 3000,
         messages: [{
           role: 'user',

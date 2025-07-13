@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, TextChannel, EmbedBuilder, Message } from 'discord.js';
+import { Client, GatewayIntentBits, TextChannel, EmbedBuilder, Message, SlashCommandBuilder, REST, Routes, CommandInteraction } from 'discord.js';
 import { ArchitectConfig } from '../types/index.js';
 
 export class ArchitectDiscord {
@@ -6,6 +6,7 @@ export class ArchitectDiscord {
   private architectChannel: TextChannel | null = null;
   private config: ArchitectConfig;
   private messageHandlers: Array<(message: Message) => Promise<void>> = [];
+  private slashCommandHandlers: Array<(interaction: CommandInteraction) => Promise<void>> = [];
 
   constructor(config: ArchitectConfig) {
     this.config = config;
@@ -23,36 +24,21 @@ export class ArchitectDiscord {
   private setupEventHandlers(): void {
     this.client.once('ready', async () => {
       console.log(`[ArchitectDiscord] Connected as ${this.client.user?.tag}`);
-      
-      // Debug logging for channel setup
       console.log(`[ArchitectDiscord] Looking for channel ID: ${this.config.architectChannelId}`);
       
       this.architectChannel = this.client.channels.cache.get(this.config.architectChannelId) as TextChannel;
       
       if (this.architectChannel) {
         console.log(`[ArchitectDiscord] Channel found: #${this.architectChannel.name}`);
-        
-        // Send startup message with command help
-        await this.sendStartupMessage();
       } else {
-        console.log(`[ArchitectDiscord] Channel not in cache, fetching from API...`);
-        
-        // Try to fetch the channel directly from the API
-        try {
-          const channel = await this.client.channels.fetch(this.config.architectChannelId);
-          if (channel && channel.isTextBased()) {
-            this.architectChannel = channel as TextChannel;
-            console.log(`[ArchitectDiscord] Channel fetched from API: #${this.architectChannel.name}`);
-            await this.sendStartupMessage();
-          }
-        } catch (fetchError) {
-          console.error(`[ArchitectDiscord] Failed to fetch channel from API:`, fetchError);
-          console.log(`[ArchitectDiscord] Bot may not have access to channel ${this.config.architectChannelId}`);
-        }
+        console.error(`[ArchitectDiscord] Channel not found: ${this.config.architectChannelId}`);
       }
       
+      // Register slash commands
+      await this.registerSlashCommands();
+      
       this.client.user?.setPresence({
-        activities: [{ name: 'Building Systems | /help', type: 3 }],
+        activities: [{ name: 'Building Systems', type: 3 }],
         status: 'online'
       });
     });
@@ -61,36 +47,106 @@ export class ArchitectDiscord {
       if (message.author.bot) return;
       if (message.channelId !== this.config.architectChannelId) return;
       
-      // Show typing indicator for command processing
-      await message.channel.sendTyping();
-      
       for (const handler of this.messageHandlers) {
         await handler(message);
       }
     });
 
-    this.client.on('error', (error) => {
-      console.error('[ArchitectDiscord] Client error:', error);
+    // Handle slash command interactions
+    this.client.on('interactionCreate', async (interaction) => {
+      if (!interaction.isChatInputCommand()) return;
+      if (interaction.channelId !== this.config.architectChannelId) return;
+
+      for (const handler of this.slashCommandHandlers) {
+        await handler(interaction);
+      }
     });
   }
 
-  private async sendStartupMessage(): Promise<void> {
-    if (!this.architectChannel) return;
-    
-    try {
-      const embed = new EmbedBuilder()
-        .setTitle('🏗️ Architect Online')
-        .setDescription('System architecture agent ready for commands')
-        .setColor(0x3498db)
-        .addFields(
-          { name: '⚡ Quick Start', value: 'Type `/help` for commands\nUse natural language or slash commands', inline: false },
-          { name: '🔧 Examples', value: '`/status` - System health\n`/analyze` - Code analysis\n`/build agent Monitor` - Create agent', inline: false }
-        )
-        .setTimestamp();
+  private async registerSlashCommands(): Promise<void> {
+    const commands = [
+      new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Show comprehensive Architect help and capabilities'),
       
-      await this.architectChannel.send({ embeds: [embed] });
+      new SlashCommandBuilder()
+        .setName('status')
+        .setDescription('Check system health and performance'),
+      
+      new SlashCommandBuilder()
+        .setName('analyze')
+        .setDescription('Analyze code or system components')
+        .addStringOption(option =>
+          option.setName('target')
+            .setDescription('What to analyze (e.g., "performance", "code health", "configuration")')
+            .setRequired(false)),
+      
+      new SlashCommandBuilder()
+        .setName('build')
+        .setDescription('Build agents, components, or features')
+        .addStringOption(option =>
+          option.setName('description')
+            .setDescription('What to build (e.g., "agent named TestBot for ping responses")')
+            .setRequired(true)),
+      
+      new SlashCommandBuilder()
+        .setName('fix')
+        .setDescription('Fix system issues or bugs')
+        .addStringOption(option =>
+          option.setName('issue')
+            .setDescription('What to fix (e.g., "buildCompleteAgent method", "JSON parsing")')
+            .setRequired(true)),
+      
+      new SlashCommandBuilder()
+        .setName('modify')
+        .setDescription('Modify system configuration or code')
+        .addStringOption(option =>
+          option.setName('change')
+            .setDescription('What to modify (e.g., "increase timeout to 30 seconds")')
+            .setRequired(true)),
+      
+      new SlashCommandBuilder()
+        .setName('examples')
+        .setDescription('Show copy-paste examples for common tasks'),
+      
+      new SlashCommandBuilder()
+        .setName('pending')
+        .setDescription('View pending approvals'),
+      
+      new SlashCommandBuilder()
+        .setName('approve')
+        .setDescription('Approve pending high-risk modifications'),
+      
+      new SlashCommandBuilder()
+        .setName('undo')
+        .setDescription('Undo the last modification'),
+      
+      new SlashCommandBuilder()
+        .setName('deploy')
+        .setDescription('Deploy changes to production')
+        .addStringOption(option =>
+          option.setName('environment')
+            .setDescription('Target environment')
+            .setRequired(false)
+            .addChoices(
+              { name: 'staging', value: 'staging' },
+              { name: 'production', value: 'production' }
+            ))
+    ];
+
+    const rest = new REST().setToken(this.config.architectToken);
+
+    try {
+      console.log('[ArchitectDiscord] Registering slash commands...');
+
+      await rest.put(
+        Routes.applicationCommands(this.client.user!.id),
+        { body: commands }
+      );
+
+      console.log('[ArchitectDiscord] ✅ Slash commands registered successfully');
     } catch (error) {
-      console.error('[ArchitectDiscord] Failed to send startup message:', error);
+      console.error('[ArchitectDiscord] Failed to register slash commands:', error);
     }
   }
 
@@ -98,16 +154,17 @@ export class ArchitectDiscord {
     this.messageHandlers.push(handler);
   }
 
+  onSlashCommand(handler: (interaction: CommandInteraction) => Promise<void>): void {
+    this.slashCommandHandlers.push(handler);
+  }
+
   async sendMessage(content: string): Promise<Message | null> {
-    if (!this.architectChannel) {
-      console.log(`[ArchitectDiscord] Cannot send message - channel not available (ID: ${this.config.architectChannelId})`);
-      return null;
-    }
+    if (!this.architectChannel) return null;
     
     try {
-      // Split long messages to avoid Discord's 2000 character limit
+      // Split long messages if needed
       if (content.length > 2000) {
-        const chunks = this.splitMessage(content, 2000);
+        const chunks = this.splitMessage(content);
         let lastMessage: Message | null = null;
         
         for (const chunk of chunks) {
@@ -124,11 +181,65 @@ export class ArchitectDiscord {
     }
   }
 
-  async sendEmbed(title: string, description: string, color: number = 0x3498db): Promise<Message | null> {
-    if (!this.architectChannel) {
-      console.log(`[ArchitectDiscord] Cannot send embed - channel not available (ID: ${this.config.architectChannelId})`);
-      return null;
+  async replyToInteraction(interaction: CommandInteraction, content: string): Promise<void> {
+    try {
+      if (content.length > 2000) {
+        // For long responses, reply with first chunk and follow up with rest
+        const chunks = this.splitMessage(content);
+        await interaction.reply(chunks[0]);
+        
+        for (let i = 1; i < chunks.length; i++) {
+          await interaction.followUp(chunks[i]);
+        }
+      } else {
+        await interaction.reply(content);
+      }
+    } catch (error) {
+      console.error('[ArchitectDiscord] Failed to reply to interaction:', error);
+      try {
+        await interaction.reply('❌ Error processing command. Please try again.');
+      } catch (fallbackError) {
+        console.error('[ArchitectDiscord] Failed to send fallback reply:', fallbackError);
+      }
     }
+  }
+
+  private splitMessage(content: string): string[] {
+    const chunks: string[] = [];
+    const maxLength = 1900; // Leave room for formatting
+    
+    let currentChunk = '';
+    const lines = content.split('\n');
+    
+    for (const line of lines) {
+      if (currentChunk.length + line.length + 1 > maxLength) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = '';
+        }
+        
+        // If single line is too long, split it
+        if (line.length > maxLength) {
+          for (let i = 0; i < line.length; i += maxLength) {
+            chunks.push(line.substring(i, i + maxLength));
+          }
+        } else {
+          currentChunk = line;
+        }
+      } else {
+        currentChunk += (currentChunk ? '\n' : '') + line;
+      }
+    }
+    
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
+  }
+
+  async sendEmbed(title: string, description: string, color: number = 0x3498db): Promise<Message | null> {
+    if (!this.architectChannel) return null;
     
     const embed = new EmbedBuilder()
       .setTitle(title)
@@ -144,35 +255,11 @@ export class ArchitectDiscord {
     }
   }
 
-  private splitMessage(text: string, maxLength: number): string[] {
-    const chunks: string[] = [];
-    let currentChunk = '';
-    
-    const lines = text.split('\n');
-    
-    for (const line of lines) {
-      if (currentChunk.length + line.length + 1 > maxLength) {
-        if (currentChunk.trim()) {
-          chunks.push(currentChunk.trim());
-        }
-        currentChunk = line;
-      } else {
-        currentChunk += (currentChunk ? '\n' : '') + line;
-      }
-    }
-    
-    if (currentChunk.trim()) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    return chunks;
-  }
-
   async start(): Promise<void> {
     await this.client.login(this.config.architectToken);
   }
 
   get isReady(): boolean {
-    return this.client.isReady() && this.architectChannel !== null;
+    return this.client.isReady();
   }
 }

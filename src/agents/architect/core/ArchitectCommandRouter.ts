@@ -71,7 +71,7 @@ export class ArchitectCommandRouter {
     
     switch (command) {
       case '/help':
-        return this.getHelpMessage();
+        return this.getDetailedHelpMessage();
       
       case '/status':
         return await this.getSystemStatus();
@@ -82,6 +82,12 @@ export class ArchitectCommandRouter {
       case '/clear':
         this.pendingApprovals.delete(userId);
         return "Cleared any pending approvals.";
+
+      case '/examples':
+        return this.getExamplesMessage();
+
+      case '/commands':
+        return this.getCommandsMessage();
       
       default:
         // Try to parse as a natural language command
@@ -100,7 +106,7 @@ export class ArchitectCommandRouter {
         // Store for pending approval
         this.pendingApprovals.set(userId, request);
         
-        return `**Modification Plan Review Required**
+        return `**⚠️ Modification Plan Review Required**
 
 **Request:** ${request.description}
 **Risk Level:** ${request.riskLevel}
@@ -128,43 +134,204 @@ This modification requires approval due to its risk level. Reply with "approve" 
     return highRiskKeywords.some(keyword => lowerInput.includes(keyword));
   }
 
-  private getHelpMessage(): string {
-    return `**🏗️ Architect Online - System Architecture Agent**
+  private getDetailedHelpMessage(): string {
+    return `# 🏗️ **Architect Online - System Architecture Agent**
 
-**Quick Start**
-- Type /help for commands
-- Use natural language or slash commands
+## 🚀 **Quick Start Guide**
+Type your request in natural language or use slash commands. I can analyze, build, modify, and manage your AI development system.
 
-**🔧 Examples**
-- /status - System health
-- /analyze - Code analysis  
-- /build agent Monitor - Create agent
+---
 
-**💬 Natural Language**
-- "Can you fix for me?"
-- "Build an agent named TestBot for simple ping responses"
-- "Give me a game plan to fix the buildcompleteagent method"
-- "Analyze system performance"
-- "Create a Discord bot for monitoring"
+## 📋 **Essential Commands**
 
-**⚡ Quick Commands**
-- "approve" - Execute pending modifications
-- "undo last" - Reverse last change
-- "show status" - System overview
+### **System Commands**
+\`\`\`
+/help       - This comprehensive guide
+/status     - System health and performance
+/examples   - Copy-paste examples
+/commands   - Quick command reference
+/pending    - View pending approvals
+/clear      - Clear pending operations
+\`\`\`
 
-**🎯 Capabilities**
-- **Analysis:** Code health, performance, architecture review
-- **Building:** Agents, integrations, system components  
-- **Modification:** Code changes, configuration updates
-- **Configuration:** System settings, environment setup
+---
 
-**🚨 High-Risk Operations**
-Some operations require approval for safety:
-- File deletions or major structural changes
+## 💬 **Natural Language Examples** (Copy & Paste)
+
+### **Agent Creation**
+\`\`\`
+Build an agent named TestBot for simple ping responses
+Create a monitoring agent for system health checks
+Build a Discord bot for customer support
+Generate a data analysis agent with charts
+\`\`\`
+
+### **System Analysis**
+\`\`\`
+Analyze system performance
+Check code health and issues
+Show me current configuration values
+What's the Commander's token limit?
+How many agents are running?
+\`\`\`
+
+### **Code Modifications**
+\`\`\`
+Can you fix the buildCompleteAgent method?
+Increase API timeout from 5 to 30 seconds
+Tone down Commander's humor by 20%
+Update Discord integration settings
+Fix the JSON parsing errors
+\`\`\`
+
+### **Project Management**
+\`\`\`
+Deploy the latest changes
+Create a backup of current system
+Show modification history
+Undo last change
+Set up production environment
+\`\`\`
+
+---
+
+## ⚡ **Quick Actions**
+- **"approve"** - Execute pending high-risk modifications
+- **"status"** - Quick system overview
+- **"help"** - Show this guide
+- **"fix errors"** - Auto-detect and resolve issues
+
+---
+
+## 🎯 **Core Capabilities**
+
+### **🔍 Analysis & Monitoring**
+- Code health assessment and performance metrics
+- System architecture review and optimization
+- Configuration analysis and recommendations
+- Error detection and diagnostic reporting
+
+### **🛠️ Building & Creation**
+- Complete AI agent generation with Discord integration
+- System component creation and configuration
+- Database schema and API endpoint generation
+- Development environment setup and deployment
+
+### **🔧 Modification & Maintenance**
+- Targeted code modifications and bug fixes
+- Configuration updates and system tuning
+- Dependency management and version updates
+- Architecture refactoring and optimization
+
+### **📊 Project Management**
+- Work item tracking and progress monitoring
+- Team coordination and task delegation
+- Deployment pipeline management
+- Version control and change tracking
+
+---
+
+## 🚨 **Risk Management**
+
+### **Automatic Execution** (Low Risk)
+- Configuration queries and analysis
+- Non-destructive code generation
+- System health checks and monitoring
+- Documentation and reporting
+
+### **Approval Required** (High Risk)
+- File deletions or structural changes
 - Production/main branch modifications
 - Critical system component changes
+- Database schema modifications
 
-Organized, well-documented, and ready to accelerate development.`;
+---
+
+## 💡 **Pro Tips**
+
+1. **Be specific**: "Fix the JSON parsing in CodeModifier" vs "fix errors"
+2. **Use examples**: Reference existing patterns when requesting new features
+3. **Test safely**: High-risk operations require approval for your protection
+4. **Ask questions**: "What would happen if..." to understand impact
+5. **Iterate**: Start with small changes, then build complexity
+
+---
+
+## 🔗 **Integration Features**
+- **Discord**: Full bot creation and channel management
+- **Git**: Version control and branch management
+- **Claude API**: Intelligent analysis and generation
+- **Railway**: Deployment and environment management
+
+---
+
+**Ready to build!** Try any of the examples above or describe what you'd like to accomplish. I'm here to accelerate your development with intelligent automation and expert guidance.`;
+  }
+
+  private getExamplesMessage(): string {
+    return `# 📚 **Copy-Paste Examples**
+
+## 🤖 **Agent Creation**
+\`\`\`
+Build an agent named HealthBot for system monitoring
+Create a Discord bot for user support with friendly personality
+Generate a data visualization agent for analytics dashboards
+Build a deployment manager for Railway integration
+\`\`\`
+
+## 🔧 **Quick Fixes**
+\`\`\`
+Fix the buildCompleteAgent method error
+Resolve JSON parsing failures in CodeModifier
+Update git operations to work without repository
+Increase Claude API timeout to 30 seconds
+\`\`\`
+
+## 📊 **Analysis Requests**
+\`\`\`
+Analyze system performance and bottlenecks
+Check current API usage and costs
+Show me all configuration values
+What Discord channels are configured?
+Review code quality and architecture
+\`\`\`
+
+## ⚙️ **Configuration Changes**
+\`\`\`
+Set Commander response length to 2-3 sentences
+Enable debug logging for Discord integration
+Update environment variables for production
+Configure automatic backups every hour
+\`\`\`
+
+**Just copy, paste, and modify these examples for your needs!**`;
+  }
+
+  private getCommandsMessage(): string {
+    return `# ⚡ **Quick Command Reference**
+
+## **System**
+- \`/status\` - Health check
+- \`/help\` - Full guide
+- \`/examples\` - Copy-paste examples
+
+## **Natural Language**
+- \`"analyze [component]"\` - Code analysis
+- \`"build [description]"\` - Create components
+- \`"fix [issue]"\` - Resolve problems
+- \`"show [info]"\` - Display information
+
+## **Approval Workflow**
+- High-risk operations → Shows plan
+- Reply \`"approve"\` → Executes safely
+- Reply \`"cancel"\` → Aborts operation
+
+## **Emergency**
+- \`"undo last"\` - Reverse changes
+- \`"status"\` - System overview
+- \`"help"\` - Get assistance
+
+**Type any request in natural language - I understand context!**`;
   }
 
   private async getSystemStatus(): Promise<string> {
@@ -187,14 +354,15 @@ Organized, well-documented, and ready to accelerate development.`;
     const pending = this.pendingApprovals.get(userId);
     
     if (!pending) {
-      return "No pending approvals.";
+      return "✅ No pending approvals.";
     }
     
-    return `**Pending Approval:**
+    return `⏳ **Pending Approval:**
+
 **Request:** ${pending.description}
 **Type:** ${pending.type}
 **Risk Level:** ${pending.riskLevel}
 
-Reply with "approve" to execute or provide more details to refine.`;
+Reply with **"approve"** to execute or provide more details to refine.`;
   }
 }

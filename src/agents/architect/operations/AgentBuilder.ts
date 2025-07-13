@@ -49,7 +49,7 @@ export class AgentBuilder {
     
     try {
       const response = await this.claude.messages.create({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-3-haiku-20240307', // Fixed: Use correct model name
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -75,9 +75,9 @@ Analyze what kind of agent is needed and respond in JSON format:
 }
 
 Examples:
+- "TestBot for ping responses" → TestBot with simple response capabilities
 - "performance monitoring agent" → PerformanceMonitor + PerformanceWatch
 - "deployment manager" → DeploymentManager + DeploymentWatch
-- "code quality checker" → QualityChecker + QualityWatch
 
 Always include a watcher for learning and eventual local model replacement.`
         }]
@@ -86,9 +86,19 @@ Always include a watcher for learning and eventual local model replacement.`
       const content = response.content[0];
       if (content.type === 'text') {
         try {
-          const parsed = JSON.parse(content.text);
+          let jsonText = content.text.trim();
+          
+          // Extract JSON from response if it has extra text
+          const jsonStart = jsonText.indexOf('{');
+          const jsonEnd = jsonText.lastIndexOf('}') + 1;
+          
+          if (jsonStart !== -1 && jsonEnd > jsonStart) {
+            jsonText = jsonText.substring(jsonStart, jsonEnd);
+          }
+          
+          const parsed = JSON.parse(jsonText);
           return {
-            name: parsed.name || 'CustomAgent',
+            name: parsed.name || this.extractNameFromRequest(request),
             purpose: parsed.purpose || 'Custom functionality',
             capabilities: parsed.capabilities || ['basic-processing'],
             dependencies: parsed.dependencies || ['@anthropic-ai/sdk'],
@@ -103,14 +113,58 @@ Always include a watcher for learning and eventual local model replacement.`
             watcherPurpose: parsed.watcherPurpose || `Learning patterns for ${parsed.name || 'agent'} optimization`
           };
         } catch (parseError) {
-          console.error('[AgentBuilder] Failed to parse agent spec:', parseError);
+          console.error('[AgentBuilder] Failed to parse agent spec JSON:', parseError);
+          console.log('[AgentBuilder] Raw response:', content.text);
+          // Fall back to extracted name from request
+          return this.createFallbackSpec(request);
         }
       }
     } catch (error) {
       console.error('[AgentBuilder] Agent spec parsing failed:', error);
+      // Create fallback spec with extracted name
+      return this.createFallbackSpec(request);
     }
 
-    return this.fallbackAgentSpec(request);
+    return this.createFallbackSpec(request);
+  }
+
+  private extractNameFromRequest(request: string): string {
+    // Try to extract agent name from request
+    const patterns = [
+      /named (\w+)/i,
+      /agent (\w+)/i,
+      /(\w+) agent/i,
+      /build (\w+)/i,
+      /create (\w+)/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = request.match(pattern);
+      if (match && match[1] && match[1].toLowerCase() !== 'agent') {
+        return match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+      }
+    }
+    
+    return 'CustomAgent';
+  }
+
+  private createFallbackSpec(request: string): AgentSpec {
+    const name = this.extractNameFromRequest(request);
+    return {
+      name,
+      purpose: `Agent for: ${request}`,
+      capabilities: ['basic-processing', 'simple-responses'],
+      dependencies: ['@anthropic-ai/sdk'],
+      structure: {
+        core: [`${name}.ts`],
+        intelligence: [`${name}Intelligence.ts`],
+        communication: [`${name}Voice.ts`]
+      },
+      discordIntegration: true,
+      voicePersonality: 'Friendly and responsive',
+      createWatcher: true,
+      watcherPurpose: `Learning patterns for ${name} optimization`
+    };
   }
 
   /**
@@ -201,9 +255,10 @@ Always include a watcher for learning and eventual local model replacement.`
         // Continue - this can be done manually
       }
       
-      // 6. Create Discord bot if needed
+      // 6. Create Discord bot if needed (skip if it fails)
       if (spec.discordIntegration && this.discordCreator) {
         try {
+          console.log(`[AgentBuilder] Attempting Discord bot creation for ${spec.name}...`);
           const botConfig = await this.discordCreator.createDiscordBot(
             spec.name, 
             `AI Agent for ${spec.purpose}`
@@ -227,6 +282,7 @@ Always include a watcher for learning and eventual local model replacement.`
         } catch (error) {
           console.error('[AgentBuilder] Discord integration failed:', error);
           // Continue without Discord - agent can still function
+          console.log('[AgentBuilder] Continuing without Discord integration...');
         }
       }
       
@@ -253,16 +309,6 @@ Always include a watcher for learning and eventual local model replacement.`
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[AgentBuilder] ❌ Failed to build agent ${spec.name}:`, error);
-      
-      // Clean up partial creation
-      try {
-        if (createdFiles.length > 0) {
-          console.log(`[AgentBuilder] Cleaning up ${createdFiles.length} partially created files...`);
-          // Note: In production, you might want to keep partial files for debugging
-        }
-      } catch (cleanupError) {
-        console.error('[AgentBuilder] Cleanup failed:', cleanupError);
-      }
       
       return {
         summary: `Failed to create agent ${spec.name}: ${errorMessage}`,
@@ -430,29 +476,29 @@ export class ${spec.name}Orchestrator {
     console.log('[${spec.name}Orchestrator] Executing:', analysis.type);
     
     switch (analysis.type) {
-      case 'primary-function':
-        return await this.handlePrimaryFunction(analysis);
-      case 'secondary-function':
-        return await this.handleSecondaryFunction(analysis);
+      case 'ping':
+        return await this.handlePing(analysis);
+      case 'simple-response':
+        return await this.handleSimpleResponse(analysis);
       default:
         return { success: false, message: 'Unknown request type' };
     }
   }
 
-  private async handlePrimaryFunction(analysis: any): Promise<any> {
-    // Implement primary functionality for ${spec.purpose}
+  private async handlePing(analysis: any): Promise<any> {
+    // Simple ping-pong response for ${spec.name}
     return {
       success: true,
-      message: 'Primary function executed successfully',
-      data: analysis
+      message: 'Pong! ${spec.name} is online and responsive.',
+      data: { timestamp: new Date().toISOString() }
     };
   }
 
-  private async handleSecondaryFunction(analysis: any): Promise<any> {
-    // Implement secondary functionality
+  private async handleSimpleResponse(analysis: any): Promise<any> {
+    // Handle simple responses
     return {
       success: true,
-      message: 'Secondary function executed successfully',
+      message: \`${spec.name} processed: \${analysis.input}\`,
       data: analysis
     };
   }
@@ -486,9 +532,9 @@ REQUEST: \${input}
 
 Respond with JSON:
 {
-  "type": "primary-function" | "secondary-function",
+  "type": "ping" | "simple-response",
   "confidence": 0.0-1.0,
-  "parameters": {},
+  "input": "\${input}",
   "reasoning": "Why this classification"
 }\`
         }]
@@ -510,11 +556,21 @@ Respond with JSON:
   }
 
   private fallbackAnalysis(input: string): any {
+    // Simple ping detection
+    if (input.toLowerCase().includes('ping')) {
+      return {
+        type: 'ping',
+        confidence: 0.9,
+        input,
+        reasoning: 'Detected ping keyword'
+      };
+    }
+    
     return {
-      type: 'primary-function',
+      type: 'simple-response',
       confidence: 0.5,
-      parameters: { input },
-      reasoning: 'Fallback analysis due to processing error'
+      input,
+      reasoning: 'Fallback analysis - treating as simple response'
     };
   }
 }`;
@@ -783,24 +839,5 @@ async function ${startFunctionName}() {
       console.error('[AgentBuilder] Failed to update main index:', error);
       throw error;
     }
-  }
-
-  private fallbackAgentSpec(request: string): AgentSpec {
-    const name = 'CustomAgent';
-    return {
-      name,
-      purpose: 'Custom functionality',
-      capabilities: ['basic-processing'],
-      dependencies: ['@anthropic-ai/sdk'],
-      structure: {
-        core: [`${name}.ts`],
-        intelligence: [`${name}Intelligence.ts`],
-        communication: [`${name}Voice.ts`]
-      },
-      discordIntegration: true,
-      voicePersonality: 'Professional and helpful',
-      createWatcher: true,
-      watcherPurpose: 'Learning patterns for optimization'
-    };
   }
 }

@@ -1,7 +1,7 @@
 import { ArchitectDiscord } from './communication/ArchitectDiscord.js';
 import { ArchitectCommandRouter } from './core/ArchitectCommandRouter.js';
 import { UniversalAnalyzer } from './core/UniversalAnalyzer.js';
-import { ArchitectOrchestrator } from './core/ArchitectOrchestrator.js';
+import { CompleteArchitectOrchestrator } from './core/CompleteArchitectOrchestrator.js';
 import { CodeAnalyzer } from './intelligence/CodeAnalyzer.js';
 import { CodeModifier } from './operations/CodeModifier.js';
 import { AgentBuilder } from './operations/AgentBuilder.js';
@@ -27,7 +27,7 @@ export class Architect {
     this.discord = new ArchitectDiscord(config);
     this.commandRouter = new ArchitectCommandRouter(config);
     this.analyzer = new UniversalAnalyzer(config.claudeApiKey);
-    this.orchestrator = new ArchitectOrchestrator(config);
+    this.orchestrator = new CompleteArchitectOrchestrator(config);
     this.codeAnalyzer = new CodeAnalyzer(config.claudeApiKey);
     this.modifier = new CodeModifier(config.claudeApiKey);
     this.builder = new AgentBuilder(config.claudeApiKey, config.discordToken);

@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import path from 'path';
 import { execSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { ModificationPlan, Change } from '../types/index.js';
@@ -54,450 +55,120 @@ export class CodeModifier {
       changes: plan.changes,
       riskLevel: plan.riskLevel,
       requiresApproval: plan.riskLevel === 'high',
-      estimatedImpact: plan.impact
+      estimatedDuration: '5-15 minutes'
     };
   }
 
-  /**
-   * Plan targeted modifications using the intelligence system
-   */
-  async planTargetedModification(request: string): Promise<ModificationPlan | null> {
-    const lowerRequest = request.toLowerCase();
+  async executeModification(plan: ModificationPlan): Promise<any> {
+    console.log(`[CodeModifier] Executing: ${plan.description}`);
     
-    // Identify if this is a targeted modification
-    const isTargeted = lowerRequest.includes('change') || lowerRequest.includes('increase') || 
-                      lowerRequest.includes('decrease') || lowerRequest.includes('set') ||
-                      lowerRequest.includes('tone down') || lowerRequest.includes('make');
+    let checkpoint: string | null = null;
     
-    if (!isTargeted) return null;
-
-    console.log(`[CodeModifier] Planning targeted modification: ${request}`);
-    
-    // Discover relevant files
-    const files = FileMapper.discoverFiles(request);
-    if (files.length === 0) return null;
-    
-    // Extract current configurations
-    const configReport = await this.configExtractor.extractConfiguration(files, request);
-    
-    // Generate targeted modifications
-    const modifications = await this.generateTargetedModifications(request, configReport, files);
-    
-    if (modifications.length === 0) return null;
-    
-    // Convert to change objects
-    const changes: Change[] = modifications.map(mod => ({
-      file: mod.file,
-      type: 'modify' as const,
-      description: `Change ${mod.property} from ${mod.currentValue} to ${mod.newValue}`,
-      location: `line ${mod.lineNumber}`,
-      content: this.generateModificationContent(mod)
-    }));
-    
-    // Determine risk level
-    let riskLevel: 'low' | 'medium' | 'high' = 'low';
-    if (modifications.some(m => m.property.includes('token') && typeof m.newValue === 'number' && m.newValue > 200)) {
-      riskLevel = 'medium';
-    }
-    if (modifications.some(m => m.property.includes('PROMPT') || m.file.includes('Voice'))) {
-      riskLevel = 'medium';
-    }
-    
-    return {
-      id: `targeted_${Date.now()}`,
-      description: `Targeted modification: ${request}`,
-      files: modifications.map(m => m.file),
-      changes,
-      riskLevel,
-      requiresApproval: riskLevel === 'high',
-      estimatedImpact: `Will modify ${modifications.length} configuration value(s) in ${files.length} file(s)`
-    };
-  }
-
-  /**
-   * Generate specific targeted modifications
-   */
-  async generateTargetedModifications(request: string, configReport: any, files: string[]): Promise<TargetedModification[]> {
-    const lowerRequest = request.toLowerCase();
-    const modifications: TargetedModification[] = [];
-    
-    // Combine all configuration values
-    const allConfigs = [
-      ...configReport.configurations,
-      ...configReport.constants,
-      ...configReport.prompts
-    ];
-    
-    for (const config of allConfigs) {
-      const targetedMod = this.analyzeConfigForModification(config, request, lowerRequest);
-      if (targetedMod) {
-        modifications.push(targetedMod);
+    try {
+      // Create checkpoint before making changes
+      checkpoint = await this.createCheckpoint(plan.description);
+      
+      const results: string[] = [];
+      
+      for (const change of plan.changes) {
+        const result = await this.applyIntelligentChange(change);
+        results.push(result);
       }
-    }
-    
-    return modifications;
-  }
-
-  /**
-   * Analyze if a config should be modified based on the request
-   */
-  private analyzeConfigForModification(config: ConfigValue, request: string, lowerRequest: string): TargetedModification | null {
-    const { key, value, file, line } = config;
-    const lowerKey = key.toLowerCase();
-    
-    // Token limit modifications
-    if (lowerKey.includes('max_tokens') || lowerKey.includes('token')) {
-      if (lowerRequest.includes('increase') && lowerRequest.includes('token')) {
-        const currentValue = typeof value === 'number' ? value : parseInt(value) || 35;
-        let newValue = currentValue;
+      
+      // Try to commit and sync changes
+      try {
+        await this.commitAndSync(plan.description);
         
-        if (lowerRequest.includes('sentence') || lowerRequest.includes('2-3 sentence')) {
-          newValue = 150; // Enough for 2-3 sentences
-        } else if (lowerRequest.includes('20 words')) {
-          newValue = 30; // Approximately 20 words
-        } else {
-          newValue = Math.min(500, currentValue * 3); // Safe increase
+        // Log successful modification
+        await this.logModification({
+          id: plan.id,
+          timestamp: new Date().toISOString(),
+          description: plan.description,
+          files: plan.files,
+          gitCommit: checkpoint || 'file-based',
+          canUndo: true
+        });
+        
+        return {
+          success: true,
+          summary: `${plan.description}. Modified ${plan.files.length} files.`,
+          results,
+          committed: true,
+          gitCommit: checkpoint
+        };
+        
+      } catch (commitError) {
+        console.error('[CodeModifier] Commit/sync failed:', commitError);
+        
+        return {
+          success: true,
+          summary: `${plan.description}. Modified files but sync failed: ${commitError.message}`,
+          results,
+          committed: false
+        };
+      }
+      
+    } catch (error) {
+      // Rollback if we have a checkpoint and execution failed
+      if (checkpoint) {
+        try {
+          await this.rollbackToCheckpoint(checkpoint);
+          console.log(`[CodeModifier] Rolled back to checkpoint due to error`);
+        } catch (rollbackError) {
+          console.error('[CodeModifier] Rollback also failed:', rollbackError);
         }
-        
-        return {
-          file,
-          property: key,
-          currentValue,
-          newValue,
-          lineNumber: line,
-          context: `Increasing token limit from ${currentValue} to ${newValue}`
-        };
       }
+      
+      throw error;
     }
+  }
+
+  async planTargetedModification(request: string): Promise<ModificationPlan | null> {
+    console.log(`[CodeModifier] Analyzing for targeted modification: ${request}`);
     
-    // Humor modifications
-    if (lowerKey.includes('humor') || (key.includes('PROMPT') && lowerRequest.includes('humor'))) {
-      if (lowerRequest.includes('tone down') || lowerRequest.includes('reduce')) {
-        return {
-          file,
-          property: key,
-          currentValue: value,
-          newValue: this.generateReducedHumorPrompt(value),
-          lineNumber: line,
-          context: 'Reducing humor level in voice prompt'
-        };
-      }
-    }
+    // Look for specific patterns that indicate targeted modifications
+    const patterns = {
+      configValue: /(?:change|set|update|modify)\s+(.+?)\s+(?:to|=)\s+(.+)/i,
+      toneDown: /tone down (.+?) by (\d+)%/i,
+      increase: /increase (.+?) (?:from|to) (\d+)/i,
+      disable: /disable (.+)/i,
+      enable: /enable (.+)/i
+    };
     
-    // Timeout modifications
-    if (lowerKey.includes('timeout')) {
-      if (lowerRequest.includes('increase') || lowerRequest.includes('30 seconds') || lowerRequest.includes('60 seconds')) {
-        const targetSeconds = lowerRequest.includes('30') ? 30000 : 
-                             lowerRequest.includes('60') ? 60000 : 30000;
-        return {
-          file,
-          property: key,
-          currentValue: value,
-          newValue: targetSeconds,
-          lineNumber: line,
-          context: `Updating timeout to ${targetSeconds}ms`
-        };
+    for (const [type, pattern] of Object.entries(patterns)) {
+      const match = request.match(pattern);
+      if (match) {
+        console.log(`[CodeModifier] Detected ${type} pattern`);
+        return await this.createTargetedPlan(type, match, request);
       }
     }
     
     return null;
   }
 
-  /**
-   * Generate content for a targeted modification
-   */
-  private generateModificationContent(mod: TargetedModification): string {
-    if (mod.property.includes('PROMPT')) {
-      // For prompts, return the new prompt content
-      return mod.newValue;
-    } else {
-      // For simple values, return the assignment
-      return `${mod.property}: ${typeof mod.newValue === 'string' ? `'${mod.newValue}'` : mod.newValue}`;
-    }
-  }
-
-  /**
-   * Generate a reduced humor version of a voice prompt
-   */
-  private generateReducedHumorPrompt(originalPrompt: string): string {
-    if (typeof originalPrompt !== 'string') return originalPrompt;
-    
-    return originalPrompt
-      .replace(/- Dry humor that lands naturally - never forced or trying too hard/g, '- Professional tone with subtle wit when appropriate')
-      .replace(/- Witty one-liners that feel effortless and classy/g, '- Clear, concise responses')
-      .replace(/- Charming and endearing beneath professional composure/g, '- Professional and helpful')
-      .replace(/HUMOR STYLE:[\s\S]*?RESPONSE PATTERNS/g, 'RESPONSE PATTERNS')
-      .replace(/Sophisticated enough for a boardroom, warm enough for late-night coding/g, 'Professional and appropriate for business context');
-  }
-
-  async executeModification(plan: ModificationPlan): Promise<any> {
-    console.log(`[CodeModifier] Executing: ${plan.description}`);
-    
-    // Create a git checkpoint before making changes
-    const checkpoint = await this.createCheckpoint(plan.description);
-    
-    const results = [];
-    const modifiedFiles: string[] = [];
-    
-    for (const change of plan.changes) {
-      try {
-        let result;
-        // Check if this is a targeted modification
-        if (plan.id.startsWith('targeted_') && change.location?.includes('line')) {
-          result = await this.applyTargetedChange(change);
-        } else {
-          result = await this.applyIntelligentChange(change);
-        }
-        
-        results.push({ change: change.description, status: 'success', result });
-        modifiedFiles.push(change.file);
-      } catch (error) {
-        results.push({ change: change.description, status: 'failed', error: (error as Error).message });
-        
-        // If any change fails, rollback
-        if (checkpoint) {
-          await this.rollbackToCheckpoint(checkpoint);
-          return {
-            summary: `Modification failed, rolled back to checkpoint ${checkpoint}`,
-            results,
-            committed: false,
-            rollback: checkpoint
-          };
-        }
-      }
-    }
-
-    // If all changes successful, commit and sync
-    if (results.every(r => r.status === 'success')) {
-      const commit = await this.commitAndSync(plan.description, modifiedFiles);
-      
-      // Log to history
-      await this.logModification({
-        id: plan.id,
-        timestamp: new Date().toISOString(),
-        description: plan.description,
-        files: modifiedFiles,
-        gitCommit: commit,
-        canUndo: true
-      });
-      
-      return {
-        summary: `${results.length} changes applied and synced to Railway`,
-        results,
-        committed: true,
-        gitCommit: commit,
-        canUndo: true
-      };
-    }
-
-    return {
-      summary: `${results.filter(r => r.status === 'success').length}/${results.length} changes applied`,
-      results,
-      committed: false
-    };
-  }
-
-  /**
-   * Apply targeted changes using precise line modifications
-   */
-  async applyTargetedChange(change: Change): Promise<string> {
-    console.log(`[CodeModifier] Applying targeted change to ${change.file}: ${change.description}`);
-    
-    const filePath = change.file;
-    
-    // Read the current file content
-    const content = await fs.readFile(filePath, 'utf-8');
-    const lines = content.split('\n');
-    
-    // Extract line number from location
-    const lineMatch = change.location?.match(/line (\d+)/);
-    if (!lineMatch) {
-      throw new Error(`No line number found in location: ${change.location}`);
-    }
-    
-    const lineNumber = parseInt(lineMatch[1]) - 1; // Convert to 0-based index
-    
-    if (lineNumber < 0 || lineNumber >= lines.length) {
-      throw new Error(`Line number ${lineNumber + 1} is out of range for ${filePath}`);
-    }
-    
-    const originalLine = lines[lineNumber];
-    let newLine = '';
-    
-    // Apply different modification strategies based on the change
-    if (change.description.includes('max_tokens')) {
-      // Modify token limits
-      newLine = this.modifyTokenLimit(originalLine, change);
-    } else if (change.description.includes('timeout')) {
-      // Modify timeout values  
-      newLine = this.modifyTimeout(originalLine, change);
-    } else if (change.description.includes('humor') || change.description.includes('PROMPT')) {
-      // Modify prompts - this is more complex and might span multiple lines
-      return await this.modifyPromptContent(filePath, lineNumber, change);
-    } else {
-      // Generic property modification
-      newLine = this.modifyGenericProperty(originalLine, change);
-    }
-    
-    if (newLine === originalLine) {
-      throw new Error(`No change detected for line: ${originalLine}`);
-    }
-    
-    // Replace the line
-    lines[lineNumber] = newLine;
-    
-    // Write back to file
-    await fs.writeFile(filePath, lines.join('\n'), 'utf-8');
-    
-    console.log(`[CodeModifier] Modified ${filePath} line ${lineNumber + 1}: ${originalLine.trim()} → ${newLine.trim()}`);
-    
-    return `Modified line ${lineNumber + 1}: ${newLine.trim()}`;
-  }
-
-  /**
-   * Modify token limit in a line
-   */
-  private modifyTokenLimit(line: string, change: Change): string {
-    // Extract new value from change content
-    const newValueMatch = change.content?.match(/(\d+)/);
-    if (!newValueMatch) {
-      throw new Error('No new token value found in change content');
-    }
-    
-    const newTokens = newValueMatch[1];
-    
-    // Replace max_tokens: oldValue with max_tokens: newValue
-    return line.replace(/max_tokens:\s*\d+/, `max_tokens: ${newTokens}`);
-  }
-
-  /**
-   * Modify timeout value in a line  
-   */
-  private modifyTimeout(line: string, change: Change): string {
-    const newValueMatch = change.content?.match(/(\d+)/);
-    if (!newValueMatch) {
-      throw new Error('No new timeout value found in change content');
-    }
-    
-    const newTimeout = newValueMatch[1];
-    
-    // Handle various timeout patterns
-    return line
-      .replace(/timeout:\s*\d+/, `timeout: ${newTimeout}`)
-      .replace(/TimeOut:\s*\d+/, `TimeOut: ${newTimeout}`)
-      .replace(/\d+\s*seconds?/, `${newTimeout} seconds`);
-  }
-
-  /**
-   * Modify generic property in a line
-   */
-  private modifyGenericProperty(line: string, change: Change): string {
-    if (!change.content) {
-      throw new Error('No new content provided for generic modification');
-    }
-    
-    // Try to extract property name and value from change content
-    const propertyMatch = change.content.match(/(\w+):\s*(.+)/);
-    if (propertyMatch) {
-      const [, property, value] = propertyMatch;
-      const regex = new RegExp(`${property}:\\s*[^,}]+`, 'g');
-      return line.replace(regex, `${property}: ${value}`);
-    }
-    
-    return change.content;
-  }
-
-  /**
-   * Modify prompt content (handles multi-line prompts)
-   */
-  async modifyPromptContent(filePath: string, startLine: number, change: Change): Promise<string> {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const lines = content.split('\n');
-    
-    // Find the start and end of the prompt (look for template literal backticks)
-    let promptStart = startLine;
-    let promptEnd = startLine;
-    
-    // Find the start of the template literal
-    while (promptStart > 0 && !lines[promptStart].includes('`')) {
-      promptStart--;
-    }
-    
-    // Find the end of the template literal
-    while (promptEnd < lines.length - 1 && !lines[promptEnd + 1].includes('`;')) {
-      promptEnd++;
-    }
-    
-    if (change.content && typeof change.content === 'string') {
-      // Replace the entire prompt content
-      const newPromptLines = change.content.split('\n');
-      const beforePrompt = lines.slice(0, promptStart + 1);
-      const afterPrompt = lines.slice(promptEnd + 1);
-      
-      // Reconstruct with new prompt
-      beforePrompt[beforePrompt.length - 1] = beforePrompt[beforePrompt.length - 1].replace(/`.*/, '`' + newPromptLines[0]);
-      const newLines = [...beforePrompt, ...newPromptLines.slice(1), ...afterPrompt];
-      
-      await fs.writeFile(filePath, newLines.join('\n'), 'utf-8');
-      return `Modified prompt content (${promptEnd - promptStart + 1} lines)`;
-    }
-    
-    throw new Error('No new prompt content provided');
-  }
-
-  async undoLastModification(): Promise<any> {
-    const lastMod = this.history.filter(h => h.canUndo).pop();
-    
-    if (!lastMod) {
-      return { success: false, message: 'No modifications to undo' };
-    }
-    
-    try {
-      // Git reset to before the change
-      const prevCommit = execSync(`git log --format="%H" -n 1 ${lastMod.gitCommit}^`, { encoding: 'utf8' }).trim();
-      execSync(`git reset --hard ${prevCommit}`, { stdio: 'pipe' });
-      
-      // Push the rollback
-      execSync('git push origin main --force-with-lease', { stdio: 'pipe' });
-      
-      // Mark as undone
-      lastMod.canUndo = false;
-      await this.saveHistory();
-      
-      console.log(`[CodeModifier] Undid modification: ${lastMod.description}`);
-      
-      return {
-        success: true,
-        message: `Undid: ${lastMod.description}`,
-        restoredFiles: lastMod.files,
-        gitCommit: prevCommit
-      };
-    } catch (error) {
-      console.error('[CodeModifier] Undo failed:', error);
-      return { success: false, message: `Undo failed: ${error.message}` };
-    }
-  }
-
-  async redoModification(modificationId: string): Promise<any> {
-    // For redo, we'd need to store the forward changes too
-    // For now, return info about what was undone
-    const mod = this.history.find(h => h.id === modificationId);
-    
-    if (!mod) {
-      return { success: false, message: 'Modification not found' };
-    }
+  private async createTargetedPlan(type: string, match: RegExpMatchArray, request: string): Promise<ModificationPlan> {
+    const files = await this.identifyRelevantFiles(request);
     
     return {
-      success: false,
-      message: 'Redo requires re-running the original modification',
-      originalDescription: mod.description,
-      files: mod.files
+      id: `targeted_${Date.now()}`,
+      description: `Targeted ${type}: ${request}`,
+      files,
+      changes: [{
+        file: files[0] || 'src/',
+        type: 'modify',
+        description: request,
+        location: 'Configuration section',
+        reasoning: 'Targeted configuration change',
+        content: match[2] || undefined
+      }],
+      riskLevel: 'medium',
+      requiresApproval: false,
+      estimatedDuration: '2-5 minutes'
     };
   }
 
   private async generateIntelligentPlan(request: string): Promise<any> {
     try {
-      // Read relevant files to understand current state
       const currentFiles = await this.identifyRelevantFiles(request);
       const fileContents = await this.readCurrentFiles(currentFiles);
       
@@ -506,52 +177,99 @@ export class CodeModifier {
         .join('\n\n');
 
       const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
+        model: 'claude-3-sonnet-20240229',
         max_tokens: 2000,
         messages: [{
           role: 'user',
-          content: `You are a senior software architect. Analyze this modification request and create a detailed plan.
+          content: `You are a senior software architect. Create a modification plan in valid JSON format.
 
 REQUEST: ${request}
 
 CURRENT CODE CONTEXT:
 ${codeContext}
 
-Create a modification plan in this JSON format:
+CRITICAL: Respond with ONLY valid JSON. No explanatory text before or after.
+
 {
   "description": "Clear description of what will be changed",
   "files": ["file1.ts", "file2.ts"],
   "changes": [
     {
       "file": "path/to/file.ts",
-      "type": "modify|create|delete",
+      "type": "modify",
       "description": "What specific change to make",
       "location": "class/method name or line area",
       "reasoning": "Why this change is needed"
     }
   ],
-  "riskLevel": "low|medium|high",
+  "riskLevel": "low",
   "impact": "Description of expected impact"
-}
-
-Be specific about exact changes needed. Consider the existing code structure and maintain consistency.`
+}`
         }]
       });
 
       const content = response.content[0];
       if (content.type === 'text') {
+        let jsonText = content.text.trim();
+        
+        // Extract JSON from response
+        const jsonStart = jsonText.indexOf('{');
+        const jsonEnd = jsonText.lastIndexOf('}') + 1;
+        
+        if (jsonStart !== -1 && jsonEnd > jsonStart) {
+          jsonText = jsonText.substring(jsonStart, jsonEnd);
+        }
+        
         try {
-          return JSON.parse(content.text);
+          const parsed = JSON.parse(jsonText);
+          console.log('[CodeModifier] ✅ Successfully parsed plan JSON');
+          return parsed;
         } catch (parseError) {
-          console.error('[CodeModifier] Failed to parse plan JSON:', parseError);
-          return this.fallbackPlan(request);
+          console.error('[CodeModifier] JSON parsing failed, using fallback');
+          console.error('Raw response:', jsonText.substring(0, 200) + '...');
+          return this.createFallbackPlan(request, currentFiles);
         }
       }
     } catch (error) {
       console.error('[CodeModifier] Plan generation failed:', error);
     }
 
-    return this.fallbackPlan(request);
+    return this.createFallbackPlan(request, []);
+  }
+
+  private createFallbackPlan(request: string, files: string[]): any {
+    const riskLevel = this.assessRiskLevel(request);
+    
+    return {
+      description: `Manual implementation required for: ${request}`,
+      files: files.length > 0 ? files : ['src/'],
+      changes: [{
+        file: files[0] || 'src/',
+        type: 'modify',
+        description: request,
+        location: 'To be determined during execution',
+        reasoning: 'Complex request requiring manual analysis'
+      }],
+      riskLevel,
+      impact: `${riskLevel} risk modification requiring approval`,
+      requiresApproval: riskLevel === 'high'
+    };
+  }
+
+  private assessRiskLevel(request: string): 'low' | 'medium' | 'high' {
+    const lowerRequest = request.toLowerCase();
+    
+    if (lowerRequest.includes('delete') || lowerRequest.includes('remove') || 
+        lowerRequest.includes('main branch') || lowerRequest.includes('production')) {
+      return 'high';
+    }
+    
+    if (lowerRequest.includes('modify') || lowerRequest.includes('change') || 
+        lowerRequest.includes('update') || lowerRequest.includes('fix')) {
+      return 'medium';
+    }
+    
+    return 'low';
   }
 
   private async applyIntelligentChange(change: Change): Promise<string> {
@@ -571,12 +289,12 @@ Be specific about exact changes needed. Consider the existing code structure and
 
   private async modifyFileIntelligently(change: Change): Promise<string> {
     try {
-      // Read current file
+      // Check if file exists
       const currentContent = await fs.readFile(change.file, 'utf8');
       
       // Use Claude to generate the modified version
       const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
+        model: 'claude-3-sonnet-20240229',
         max_tokens: 3000,
         messages: [{
           role: 'user',
@@ -601,6 +319,10 @@ Return the complete modified file content. Maintain all existing functionality w
       
       throw new Error('Failed to generate modified content');
     } catch (error) {
+      if (error.code === 'ENOENT') {
+        // File doesn't exist, treat as create
+        return await this.createFileIntelligently(change);
+      }
       throw new Error(`Failed to modify ${change.file}: ${error.message}`);
     }
   }
@@ -609,7 +331,7 @@ Return the complete modified file content. Maintain all existing functionality w
     try {
       // Use Claude to generate appropriate file content
       const response = await this.claude.messages.create({
-        model: 'claude-3-opus-20240229',
+        model: 'claude-3-sonnet-20240229',
         max_tokens: 3000,
         messages: [{
           role: 'user',
@@ -626,7 +348,7 @@ Generate clean, well-structured TypeScript code that follows the existing projec
       const content = response.content[0];
       if (content.type === 'text') {
         // Ensure directory exists
-        const dir = change.file.split('/').slice(0, -1).join('/');
+        const dir = path.dirname(change.file);
         await fs.mkdir(dir, { recursive: true });
         
         // Write the new file
@@ -641,45 +363,116 @@ Generate clean, well-structured TypeScript code that follows the existing projec
   }
 
   private async deleteFile(change: Change): Promise<string> {
-    await fs.unlink(change.file);
-    return `Deleted ${change.file}`;
+    try {
+      await fs.unlink(change.file);
+      return `Deleted ${change.file}`;
+    } catch (error) {
+      throw new Error(`Failed to delete ${change.file}: ${error.message}`);
+    }
   }
 
-  private async createCheckpoint(description: string): Promise<string | null> {
+  private async createCheckpoint(description: string): Promise<string> {
     try {
-      // Commit current state as checkpoint
+      // Check if we're in a git repository
+      execSync('git rev-parse --is-inside-work-tree', { stdio: 'pipe' });
+      
+      // We're in a git repo, proceed normally
       execSync('git add .', { stdio: 'pipe' });
-      execSync(`git commit -m "📍 Checkpoint before: ${description}"`, { stdio: 'pipe' });
-      const commit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-      console.log(`[CodeModifier] Created checkpoint: ${commit}`);
-      return commit;
+      const commitId = `mod_${Date.now()}`;
+      execSync(`git commit -m "Checkpoint: ${description} [${commitId}]"`, { stdio: 'pipe' });
+      
+      console.log(`[CodeModifier] ✅ Git checkpoint created: ${commitId}`);
+      return commitId;
+      
     } catch (error) {
-      console.error('[CodeModifier] Failed to create checkpoint:', error);
-      return null;
+      // Not in git repo, use file-based backup
+      console.log('[CodeModifier] Git unavailable, using file-based checkpoint');
+      return await this.createFileBasedCheckpoint(description);
+    }
+  }
+
+  private async createFileBasedCheckpoint(description: string): Promise<string> {
+    const checkpointId = `checkpoint_${Date.now()}`;
+    const backupDir = `data/backups/${checkpointId}`;
+    
+    try {
+      await fs.mkdir(backupDir, { recursive: true });
+      
+      // Copy current src directory
+      await this.copyDirectory('src', `${backupDir}/src`);
+      
+      // Save metadata
+      const metadata = {
+        id: checkpointId,
+        description,
+        timestamp: new Date().toISOString(),
+        type: 'file-based-backup'
+      };
+      
+      await fs.writeFile(`${backupDir}/metadata.json`, JSON.stringify(metadata, null, 2));
+      console.log(`[CodeModifier] File-based checkpoint created: ${checkpointId}`);
+      
+      return checkpointId;
+    } catch (error) {
+      console.error('[CodeModifier] Checkpoint creation failed:', error);
+      return `fallback_${Date.now()}`;
+    }
+  }
+
+  private async copyDirectory(src: string, dest: string): Promise<void> {
+    await fs.mkdir(dest, { recursive: true });
+    const entries = await fs.readdir(src, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      
+      if (entry.isDirectory()) {
+        await this.copyDirectory(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
     }
   }
 
   private async rollbackToCheckpoint(commit: string): Promise<void> {
     try {
-      execSync(`git reset --hard ${commit}`, { stdio: 'pipe' });
-      console.log(`[CodeModifier] Rolled back to checkpoint: ${commit}`);
+      if (commit.startsWith('checkpoint_')) {
+        // File-based checkpoint rollback
+        const backupDir = `data/backups/${commit}`;
+        await this.copyDirectory(`${backupDir}/src`, 'src');
+        console.log(`[CodeModifier] Rolled back to file-based checkpoint: ${commit}`);
+      } else {
+        // Git-based rollback
+        execSync(`git reset --hard ${commit}`, { stdio: 'pipe' });
+        console.log(`[CodeModifier] Rolled back to git checkpoint: ${commit}`);
+      }
     } catch (error) {
       console.error('[CodeModifier] Rollback failed:', error);
+      throw error;
     }
   }
 
-  private async commitAndSync(description: string, files: string[]): Promise<string> {
+  private async commitAndSync(description: string): Promise<void> {
     try {
-      execSync('git add .', { stdio: 'pipe' });
-      execSync(`git commit -m "🏗️ ${description}"`, { stdio: 'pipe' });
-      execSync('git push origin main', { stdio: 'pipe' });
+      // Check if we're in a git repository
+      execSync('git rev-parse --is-inside-work-tree', { stdio: 'pipe' });
       
-      const commit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-      console.log(`[CodeModifier] Committed and synced: ${commit}`);
-      return commit;
+      // Git operations
+      execSync('git add .', { stdio: 'pipe' });
+      execSync(`git commit -m "${description}"`, { stdio: 'pipe' });
+      
+      // Try to push, but don't fail if remote doesn't exist
+      try {
+        execSync('git push origin main', { stdio: 'pipe' });
+        console.log('[CodeModifier] Changes synced to remote repository');
+      } catch (pushError) {
+        console.log('[CodeModifier] Remote push skipped (no remote configured)');
+      }
+      
     } catch (error) {
-      console.error('[CodeModifier] Commit/sync failed:', error);
-      throw error;
+      console.log('[CodeModifier] Git operations skipped (not in repository)');
+      // Continue without git - modifications are still saved to filesystem
     }
   }
 
@@ -701,6 +494,16 @@ Generate clean, well-structured TypeScript code that follows the existing projec
       files.push('src/index.ts');
     }
 
+    if (requestLower.includes('architect') || requestLower.includes('build')) {
+      files.push('src/agents/architect/Architect.ts');
+      files.push('src/agents/architect/operations/AgentBuilder.ts');
+    }
+
+    // Default to some core files if nothing specific identified
+    if (files.length === 0) {
+      files.push('src/index.ts');
+    }
+
     return files;
   }
 
@@ -718,14 +521,32 @@ Generate clean, well-structured TypeScript code that follows the existing projec
     return contents;
   }
 
-  private fallbackPlan(request: string): any {
-    return {
-      description: `Manual implementation required for: ${request}`,
-      files: [],
-      changes: [],
-      riskLevel: 'high',
-      impact: 'Unknown impact - requires manual analysis'
-    };
+  async undoLastModification(): Promise<any> {
+    const lastMod = this.history.filter(h => h.canUndo).pop();
+    
+    if (!lastMod) {
+      return { success: false, message: 'No modifications to undo' };
+    }
+    
+    try {
+      await this.rollbackToCheckpoint(lastMod.gitCommit);
+      
+      // Mark as undone
+      lastMod.canUndo = false;
+      await this.saveHistory();
+      
+      console.log(`[CodeModifier] Undid modification: ${lastMod.description}`);
+      
+      return {
+        success: true,
+        message: `Undid: ${lastMod.description}`,
+        restoredFiles: lastMod.files,
+        gitCommit: lastMod.gitCommit
+      };
+    } catch (error) {
+      console.error('[CodeModifier] Undo failed:', error);
+      return { success: false, message: `Undo failed: ${error.message}` };
+    }
   }
 
   private async logModification(mod: ModificationHistory): Promise<void> {

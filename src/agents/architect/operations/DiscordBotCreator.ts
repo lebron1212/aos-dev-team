@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+// src/agents/architect/operations/DiscordBotCreator.ts
 import { execSync } from 'child_process';
 
 interface DiscordBotConfig {
@@ -7,158 +7,77 @@ interface DiscordBotConfig {
   permissions: string[];
   token: string;
   clientId: string;
+  channelId?: string;
   inviteUrl: string;
+  useExistingBot: boolean;
 }
 
 export class DiscordBotCreator {
-  private claude: Anthropic;
-  private discordToken: string; // Main Discord app token for API calls
+  private discordToken: string;
+  private guildId: string;
 
-  constructor(claudeApiKey: string, discordToken: string) {
-    this.claude = new Anthropic({ apiKey: claudeApiKey });
+  constructor(discordToken: string, guildId?: string) {
     this.discordToken = discordToken;
+    this.guildId = guildId || this.extractGuildId();
   }
 
   async createDiscordBot(agentName: string, purpose: string): Promise<DiscordBotConfig | null> {
-    console.log(`[DiscordBotCreator] Creating Discord bot for ${agentName}`);
+    console.log(`[DiscordBotCreator] Setting up Discord integration for ${agentName}`);
     
     try {
-      // Create Discord application via API
-      const appData = await this.createDiscordApplication(agentName, purpose);
+      // Use existing bot infrastructure instead of creating new applications
+      const channelId = await this.createChannelForAgent(this.guildId, agentName);
       
-      if (appData) {
-        // Create bot user
-        const botData = await this.createBotUser(appData.id);
-        
-        if (botData) {
-          // Generate invite URL
-          const inviteUrl = this.generateInviteUrl(appData.id, this.calculatePermissions(purpose));
-          
-          const config: DiscordBotConfig = {
-            name: agentName,
-            description: purpose,
-            permissions: this.calculatePermissions(purpose),
-            token: botData.token,
-            clientId: appData.id,
-            inviteUrl
-          };
-          
-          // Automatically set Railway environment variables
-          await this.setRailwayEnvironmentVars(agentName, config);
-          
-          console.log(`[DiscordBotCreator] Created Discord bot: ${agentName}`);
-          return config;
-        }
+      if (!channelId) {
+        console.warn(`[DiscordBotCreator] Could not create channel for ${agentName}, using existing token`);
       }
+
+      // Set Railway environment variables for the new agent
+      await this.setRailwayEnvironmentVars(agentName, this.discordToken, channelId);
+
+      // Use existing bot token and provide setup info
+      const config: DiscordBotConfig = {
+        name: agentName,
+        description: purpose,
+        permissions: this.calculatePermissions(purpose),
+        token: this.discordToken, // Use existing bot token
+        clientId: await this.getExistingClientId(), // Extract from existing token
+        channelId: channelId || undefined,
+        inviteUrl: '', // Bot already invited
+        useExistingBot: true
+      };
+
+      console.log(`[DiscordBotCreator] ✅ Discord integration ready for ${agentName}`);
+      return config;
+
     } catch (error) {
-      console.error(`[DiscordBotCreator] Failed to create Discord bot:`, error);
-    }
-    
-    return null;
-  }
-
-  private async createDiscordApplication(name: string, description: string): Promise<any> {
-    try {
-      const response = await fetch('https://discord.com/api/v10/applications', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bot ${this.discordToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: `${name} Agent`,
-          description: `AI Agent: ${description}`
-        })
-      });
+      console.error(`[DiscordBotCreator] Failed to set up Discord for ${agentName}:`, error);
       
-      if (response.ok) {
-        const data = await response.json() as { id: string };
-        console.log(`[DiscordBotCreator] Created Discord application: ${data.id}`);
-        return data;
-      } else {
-        console.error('[DiscordBotCreator] Failed to create Discord application:', await response.text());
-      }
-    } catch (error) {
-      console.error('[DiscordBotCreator] Discord API error:', error);
-    }
-    
-    return null;
-  }
-
-  private async createBotUser(applicationId: string): Promise<any> {
-    try {
-      const response = await fetch(`https://discord.com/api/v10/applications/${applicationId}/bot`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bot ${this.discordToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`[DiscordBotCreator] Created bot user for application ${applicationId}`);
-        return data;
-      } else {
-        console.error('[DiscordBotCreator] Failed to create bot user:', await response.text());
-      }
-    } catch (error) {
-      console.error('[DiscordBotCreator] Bot creation error:', error);
-    }
-    
-    return null;
-  }
-
-  private calculatePermissions(purpose: string): string[] {
-    const basePermissions = ['Send Messages', 'Read Message History', 'Use Slash Commands'];
-    
-    // Add specific permissions based on agent purpose
-    if (purpose.toLowerCase().includes('monitor')) {
-      basePermissions.push('View Channels', 'Read Messages');
-    }
-    
-    if (purpose.toLowerCase().includes('manage') || purpose.toLowerCase().includes('deploy')) {
-      basePermissions.push('Manage Messages', 'Create Threads');
-    }
-    
-    return basePermissions;
-  }
-
-  private generateInviteUrl(clientId: string, permissions: string[]): string {
-    // Calculate permission integer (simplified - would need full permission mapping)
-    const permissionInt = '8'; // Basic bot permissions
-    
-    return `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=${permissionInt}&scope=bot`;
-  }
-
-  private async setRailwayEnvironmentVars(agentName: string, config: DiscordBotConfig): Promise<void> {
-    try {
-      const tokenVar = `${agentName.toUpperCase()}_DISCORD_TOKEN`;
-      const clientVar = `${agentName.toUpperCase()}_CLIENT_ID`;
-      
-      // Set Railway environment variables automatically
-      try {
-        execSync(`railway variables --set ${tokenVar}=${config.token}`, { stdio: 'pipe' });
-        execSync(`railway variables --set ${clientVar}=${config.clientId}`, { stdio: 'pipe' });
-        
-        console.log(`[DiscordBotCreator] Set Railway environment variables for ${agentName}`);
-        
-        // Trigger Railway redeploy to pick up new variables
-        execSync('railway redeploy', { stdio: 'pipe' });
-      } catch (railwayError) {
-        console.warn('[DiscordBotCreator] Railway CLI not available or failed, environment variables need manual setup');
-        console.log(`[DiscordBotCreator] Please set these environment variables manually:`);
-        console.log(`  ${tokenVar}=${config.token}`);
-        console.log(`  ${clientVar}=${config.clientId}`);
-      }
-      
-    } catch (error) {
-      console.error('[DiscordBotCreator] Failed to set Railway variables:', error);
+      // Fallback: Still provide basic config for manual setup
+      return {
+        name: agentName,
+        description: purpose,
+        permissions: this.calculatePermissions(purpose),
+        token: this.discordToken,
+        clientId: await this.getExistingClientId(),
+        inviteUrl: '',
+        useExistingBot: true
+      };
     }
   }
 
   async createChannelForAgent(guildId: string, agentName: string): Promise<string | null> {
+    const channelName = agentName.toLowerCase();
+    
     try {
+      // Check if channel already exists
+      const existingChannel = await this.findExistingChannel(guildId, channelName);
+      if (existingChannel) {
+        console.log(`[DiscordBotCreator] Using existing #${channelName} channel: ${existingChannel.id}`);
+        return existingChannel.id;
+      }
+
+      // Create new channel
       const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
         method: 'POST',
         headers: {
@@ -166,30 +85,132 @@ export class DiscordBotCreator {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          name: agentName.toLowerCase(),
+          name: channelName,
           type: 0, // Text channel
-          topic: `AI Agent channel for ${agentName}`
+          topic: `${agentName} AI Agent - ${this.getChannelDescription(agentName)}`,
+          permission_overwrites: []
         })
       });
-      
+
       if (response.ok) {
-        const data = await response.json() as { id: string };
-        console.log(`[DiscordBotCreator] Created channel for ${agentName}: ${data.id}`);
-        
-        // Set channel ID in Railway
-        const channelVar = `${agentName.toUpperCase()}_CHANNEL_ID`;
-        try {
-          execSync(`railway variables --set ${channelVar}=${data.id}`, { stdio: 'pipe' });
-        } catch (railwayError) {
-          console.warn(`[DiscordBotCreator] Railway CLI not available, please set ${channelVar}=${data.id} manually`);
+        const channel = await response.json();
+        console.log(`[DiscordBotCreator] ✅ Created #${channelName} channel: ${channel.id}`);
+        return channel.id;
+      } else {
+        const error = await response.text();
+        console.error(`[DiscordBotCreator] Failed to create channel: ${error}`);
+        return null;
+      }
+
+    } catch (error) {
+      console.error(`[DiscordBotCreator] Channel creation error:`, error);
+      return null;
+    }
+  }
+
+  private async findExistingChannel(guildId: string, channelName: string): Promise<any> {
+    try {
+      const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
+        headers: {
+          'Authorization': `Bot ${this.discordToken}`
         }
-        
-        return data.id;
+      });
+
+      if (response.ok) {
+        const channels = await response.json();
+        return channels.find((c: any) => c.name === channelName && c.type === 0);
       }
     } catch (error) {
-      console.error('[DiscordBotCreator] Failed to create channel:', error);
+      console.error('[DiscordBotCreator] Error finding existing channel:', error);
+    }
+    return null;
+  }
+
+  private async setRailwayEnvironmentVars(agentName: string, botToken: string, channelId?: string): Promise<void> {
+    const envVars = [
+      { key: `${agentName.toUpperCase()}_DISCORD_TOKEN`, value: botToken },
+      { key: `${agentName.toUpperCase()}_CHANNEL_ID`, value: channelId || '' },
+      { key: `${agentName.toUpperCase()}_ENABLED`, value: 'true' }
+    ];
+
+    console.log(`[DiscordBotCreator] Setting Railway environment variables for ${agentName}...`);
+
+    for (const { key, value } of envVars) {
+      try {
+        if (value) { // Only set non-empty values
+          execSync(`railway variables --set ${key}="${value}"`, { stdio: 'pipe' });
+          console.log(`[DiscordBotCreator] ✅ Set ${key}`);
+        }
+      } catch (error) {
+        console.warn(`[DiscordBotCreator] ⚠️  Railway CLI not available for ${key}, manual setup required`);
+        console.log(`[DiscordBotCreator] Manual: Add ${key}=${value} to Railway environment`);
+      }
+    }
+
+    // Trigger Railway redeploy to apply new environment variables
+    try {
+      console.log(`[DiscordBotCreator] 🚀 Triggering Railway redeploy...`);
+      execSync('railway redeploy', { stdio: 'pipe' });
+      console.log(`[DiscordBotCreator] ✅ Railway redeploy triggered`);
+    } catch (error) {
+      console.warn(`[DiscordBotCreator] ⚠️  Railway redeploy failed, manual redeploy required`);
+    }
+  }
+
+  private calculatePermissions(purpose: string): string[] {
+    const basePermissions = ['Send Messages', 'Read Message History', 'Use Slash Commands'];
+    
+    if (purpose.toLowerCase().includes('ping')) {
+      basePermissions.push('Add Reactions');
     }
     
-    return null;
+    if (purpose.toLowerCase().includes('monitor')) {
+      basePermissions.push('View Channels', 'Read Messages');
+    }
+    
+    if (purpose.toLowerCase().includes('manage')) {
+      basePermissions.push('Manage Messages', 'Create Threads');
+    }
+    
+    return basePermissions;
+  }
+
+  private getChannelDescription(agentName: string): string {
+    const descriptions: Record<string, string> = {
+      'TestBot': 'Simple ping-pong responses and testing',
+      'Dashboard': 'System metrics and performance monitoring',
+      'Monitor': 'System monitoring and alerts',
+      'Deploy': 'Deployment management and automation'
+    };
+    
+    return descriptions[agentName] || `${agentName} agent operations`;
+  }
+
+  private async getExistingClientId(): Promise<string> {
+    try {
+      // Get current application info from Discord API
+      const response = await fetch('https://discord.com/api/v10/oauth2/applications/@me', {
+        headers: {
+          'Authorization': `Bot ${this.discordToken}`
+        }
+      });
+
+      if (response.ok) {
+        const app = await response.json();
+        return app.id;
+      }
+    } catch (error) {
+      console.error('[DiscordBotCreator] Could not get client ID:', error);
+    }
+    
+    // Fallback: Extract from token or use placeholder
+    return 'EXISTING_BOT_CLIENT_ID';
+  }
+
+  private extractGuildId(): string {
+    // Try to get guild ID from environment variables
+    return process.env.DISCORD_GUILD_ID || 
+           process.env.DISCORD_CHANNEL_ID?.split('').slice(0, 18).join('') || // Extract from channel ID
+           'DEFAULT_GUILD_ID';
   }
 }

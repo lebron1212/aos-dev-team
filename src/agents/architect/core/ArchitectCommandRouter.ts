@@ -1,357 +1,200 @@
-import { ArchitectConfig } from '../types/index.js';
+import { UniversalAnalyzer } from './UniversalAnalyzer.js';
 import { ArchitectOrchestrator } from './ArchitectOrchestrator.js';
-import { ArchitectVoice } from '../communication/ArchitectVoice.js';
-import { CodeIntelligence } from '../intelligence/CodeIntelligence.js';
-import { CodeAnalyzer } from '../intelligence/CodeAnalyzer.js';
-
-interface CommandResult {
-  success: boolean;
-  response: string;
-  requiresFollowUp?: boolean;
-}
+import { ArchitecturalRequest, ArchitectConfig } from '../types/index.js';
 
 export class ArchitectCommandRouter {
+  private analyzer: UniversalAnalyzer;
   private orchestrator: ArchitectOrchestrator;
-  private voice: ArchitectVoice;
-  private intelligence: CodeIntelligence;
-  private analyzer: CodeAnalyzer;
+  private pendingApprovals: Map<string, ArchitecturalRequest> = new Map();
 
   constructor(config: ArchitectConfig) {
+    this.analyzer = new UniversalAnalyzer(config.claudeApiKey);
     this.orchestrator = new ArchitectOrchestrator(config);
-    this.voice = new ArchitectVoice(config.claudeApiKey);
-    this.intelligence = new CodeIntelligence(config.claudeApiKey);
-    this.analyzer = new CodeAnalyzer(config.claudeApiKey);
   }
 
-  async routeCommand(input: string, userId: string, messageId: string): Promise<string> {
-    console.log(`[ArchitectCommandRouter] Processing: "${input}"`);
+  async routeCommand(input: string, userId: string): Promise<string> {
+    try {
+      // Handle approval commands first
+      if (this.isApprovalCommand(input)) {
+        return await this.handleApproval(userId);
+      }
 
-    const cleanInput = input.trim();
+      // Handle explicit commands
+      if (input.startsWith('/')) {
+        return await this.handleSlashCommand(input, userId);
+      }
+
+      // Route natural language requests
+      return await this.handleNaturalLanguage(input, userId);
+
+    } catch (error) {
+      console.error('[ArchitectCommandRouter] Routing failed:', error);
+      return `Command routing failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`;
+    }
+  }
+
+  private isApprovalCommand(input: string): boolean {
+    const approvalKeywords = [
+      'approve', 'approved', 'yes', 'confirm', 'execute', 
+      'proceed', 'go ahead', 'do it', 'continue'
+    ];
     
-    // Handle slash commands
-    if (cleanInput.startsWith('/')) {
-      return await this.handleSlashCommand(cleanInput, userId);
-    }
-
-    // Handle direct commands
-    const commandResult = await this.handleDirectCommand(cleanInput, userId);
-    if (commandResult.success) {
-      return commandResult.response;
-    }
-
-    // Fall back to natural language processing
-    return await this.handleNaturalLanguage(cleanInput, userId);
+    const lowerInput = input.toLowerCase().trim();
+    return approvalKeywords.some(keyword => lowerInput === keyword || lowerInput.includes(keyword));
   }
 
-  private async handleSlashCommand(command: string, userId: string): Promise<string> {
-    const parts = command.slice(1).split(' ');
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1);
+  private async handleApproval(userId: string): Promise<string> {
+    const pendingRequest = this.pendingApprovals.get(userId);
+    
+    if (!pendingRequest) {
+      return "No pending modifications to approve. Use a modification command first.";
+    }
 
-    switch (cmd) {
-      case 'help':
-        return await this.showHelp(args[0]);
-        
-      case 'status':
-        return await this.showSystemStatus();
-        
-      case 'analyze':
-        return await this.handleAnalyze(args.join(' '));
-        
-      case 'build':
-        return await this.handleBuild(args.join(' '));
-        
-      case 'modify':
-        return await this.handleModify(args.join(' '));
-        
-      case 'config':
-        return await this.handleConfig(args.join(' '));
-        
-      case 'undo':
-        return await this.handleUndo();
-        
-      case 'history':
-        return await this.showHistory();
-        
-      case 'intelligence':
-        return await this.handleIntelligence(args.join(' '));
-        
+    try {
+      // Execute the pending request
+      const result = await this.orchestrator.executeArchitecturalWork(pendingRequest);
+      
+      // Clear the pending approval
+      this.pendingApprovals.delete(userId);
+      
+      return result;
+      
+    } catch (error) {
+      console.error('[ArchitectCommandRouter] Approval execution failed:', error);
+      this.pendingApprovals.delete(userId);
+      return `Approved modification failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
+
+  private async handleSlashCommand(input: string, userId: string): Promise<string> {
+    const command = input.toLowerCase().trim();
+    
+    switch (command) {
+      case '/help':
+        return this.getHelpMessage();
+      
+      case '/status':
+        return await this.getSystemStatus();
+      
+      case '/pending':
+        return this.getPendingApprovals(userId);
+      
+      case '/clear':
+        this.pendingApprovals.delete(userId);
+        return "Cleared any pending approvals.";
+      
       default:
-        return await this.voice.formatResponse(`Unknown command: /${cmd}. Type /help for available commands.`, { type: 'error' });
+        // Try to parse as a natural language command
+        const cleanInput = input.substring(1); // Remove the /
+        return await this.handleNaturalLanguage(cleanInput, userId);
     }
-  }
-
-  private async handleDirectCommand(input: string, userId: string): Promise<CommandResult> {
-    const lower = input.toLowerCase();
-
-    // Direct command patterns
-    if (lower.includes('help') || lower === '?') {
-      return {
-        success: true,
-        response: await this.showHelp()
-      };
-    }
-
-    if (lower.includes('status') || lower.includes('health')) {
-      return {
-        success: true,
-        response: await this.showSystemStatus()
-      };
-    }
-
-    if (lower.startsWith('analyze ') || lower.includes('code analysis')) {
-      return {
-        success: true,
-        response: await this.handleAnalyze(input)
-      };
-    }
-
-    if (lower.startsWith('build ') || lower.includes('create agent')) {
-      return {
-        success: true,
-        response: await this.handleBuild(input)
-      };
-    }
-
-    if (lower.includes('undo') || lower.includes('revert')) {
-      return {
-        success: true,
-        response: await this.handleUndo()
-      };
-    }
-
-    return { success: false, response: '' };
   }
 
   private async handleNaturalLanguage(input: string, userId: string): Promise<string> {
-    // Route to orchestrator for natural language processing
-    const request = {
-      type: 'system-modification' as const,
-      description: input,
-      target: '',
-      priority: 'medium' as const,
-      riskLevel: 'medium' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
-  }
-
-  private async showHelp(category?: string): Promise<string> {
-    if (category) {
-      return await this.showCategoryHelp(category);
-    }
-
-    const helpText = `🏗️ **Architect Command Reference**
-
-**📋 Basic Commands**
-\`/help [category]\` - Show this help (try: analyze, build, modify, config)
-\`/status\` - System health and status
-\`/history\` - Recent modifications and changes
-
-**🔍 Analysis Commands**
-\`/analyze [target]\` - Analyze codebase or specific files
-\`/intelligence [query]\` - Smart code queries (e.g., "what's commander's token limit?")
-
-**🏗️ Building Commands**
-\`/build agent [name]\` - Create a new agent
-\`/build [description]\` - General building tasks
-
-**⚙️ Modification Commands**
-\`/modify [description]\` - Modify existing code
-\`/config [query]\` - View or modify configuration
-\`/undo\` - Undo last modification
-
-**💡 Natural Language**
-You can also use natural language:
-• "Analyze the voice system"
-• "What's Commander's current token limit?"
-• "Increase response length to 3 sentences"
-• "Create a new monitoring agent"
-• "Set up Discord bot for Dashboard"
-
-**🎯 Quick Examples**
-\`/analyze src/agents/commander\`
-\`/intelligence commander voice settings\`
-\`/modify increase token limit to 200\`
-\`/build agent named Monitor for system monitoring\``;
-
-    return await this.voice.formatResponse(helpText, { type: 'help' });
-  }
-
-  private async showCategoryHelp(category: string): Promise<string> {
-    const lower = category.toLowerCase();
-
-    switch (lower) {
-      case 'analyze':
-        return await this.voice.formatResponse(`🔍 **Analysis Commands**
-
-\`/analyze\` - Full system health analysis
-\`/analyze [path]\` - Analyze specific files/directories
-\`/analyze agents\` - Analyze all agents
-\`/analyze performance\` - Performance analysis
-\`/analyze dependencies\` - Dependency analysis
-
-**Examples:**
-\`/analyze src/agents/commander\`
-\`/analyze voice system\`
-\`/analyze api usage\``, { type: 'help' });
-
-      case 'build':
-        return await this.voice.formatResponse(`🏗️ **Building Commands**
-
-\`/build agent [name]\` - Create new agent with Discord integration
-\`/build component [description]\` - Create new component
-\`/build feature [description]\` - Add new feature
-\`/build discord bot for [agent]\` - Set up Discord bot
-
-**Examples:**
-\`/build agent named Monitor for system monitoring\`
-\`/build discord bot for Dashboard agent\`
-\`/build voice recognition feature\``, { type: 'help' });
-
-      case 'modify':
-        return await this.voice.formatResponse(`⚙️ **Modification Commands**
-
-\`/modify [description]\` - General modifications
-\`/config [query]\` - View/modify configuration
-\`/config set [property] [value]\` - Set configuration value
-
-**Examples:**
-\`/modify increase commander response length\`
-\`/config commander voice settings\`
-\`/config set max_tokens 200\``, { type: 'help' });
-
-      case 'config':
-        return await this.voice.formatResponse(`🔧 **Configuration Commands**
-
-\`/config\` - Show all configuration
-\`/config [component]\` - Show component config
-\`/config [property]\` - Show specific property
-\`/config set [property] [value]\` - Modify configuration
-
-**Examples:**
-\`/config commander\`
-\`/config max_tokens\`
-\`/config set response_length 150\``, { type: 'help' });
-
-      default:
-        return await this.showHelp();
-    }
-  }
-
-  private async showSystemStatus(): Promise<string> {
     try {
-      const analysis = await this.analyzer.analyzeSystemHealth();
+      // Analyze the architectural request
+      const request = await this.analyzer.analyzeArchitecturalRequest(input, userId);
       
-      const statusText = `🏗️ **System Status Report**
+      // Check if this request requires approval
+      if (request.riskLevel === 'high' || this.requiresApproval(input)) {
+        // Store for pending approval
+        this.pendingApprovals.set(userId, request);
+        
+        return `**Modification Plan Review Required**
 
-**📊 Health Metrics**
-• Files Analyzed: ${analysis.metrics.filesAnalyzed}
-• Lines of Code: ${analysis.metrics.linesOfCode.toLocaleString()}
-• Complexity Score: ${analysis.metrics.complexityScore}/10
+**Request:** ${request.description}
+**Risk Level:** ${request.riskLevel}
+**Type:** ${request.type}
 
-**💡 System Summary**
-${analysis.summary}
-
-**⚠️ Issues Found**
-${analysis.issues.length > 0 ? analysis.issues.map(issue => `• ${issue}`).join('\n') : '• No critical issues detected'}
-
-**🚀 Recommendations**
-${analysis.recommendations.length > 0 ? analysis.recommendations.map(rec => `• ${rec}`).join('\n') : '• System is performing well'}
-
-**📈 API Usage**
-• Tokens Used: ${analysis.apiUsage.tokens.toLocaleString()}
-• Cost: $${analysis.apiUsage.cost.toFixed(4)}
-• Duration: ${analysis.apiUsage.duration}ms`;
-
-      return await this.voice.formatResponse(statusText, { type: 'status' });
+This modification requires approval due to its risk level. Reply with "approve" to execute, or provide more details to refine the plan.`;
+      }
+      
+      // Execute immediately for low-risk requests
+      return await this.orchestrator.executeArchitecturalWork(request);
+      
     } catch (error) {
-      return await this.voice.formatResponse(`Status check failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { type: 'error' });
+      console.error('[ArchitectCommandRouter] Natural language processing failed:', error);
+      return `Request processing failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try rephrasing your request.`;
     }
   }
 
-  private async handleAnalyze(target: string): Promise<string> {
-    if (!target.trim()) {
-      return await this.showSystemStatus();
+  private requiresApproval(input: string): boolean {
+    const highRiskKeywords = [
+      'delete', 'remove', 'destroy', 'drop', 'purge',
+      'main branch', 'production', 'master', 'critical'
+    ];
+    
+    const lowerInput = input.toLowerCase();
+    return highRiskKeywords.some(keyword => lowerInput.includes(keyword));
+  }
+
+  private getHelpMessage(): string {
+    return `**🏗️ Architect Online - System Architecture Agent**
+
+**Quick Start**
+- Type /help for commands
+- Use natural language or slash commands
+
+**🔧 Examples**
+- /status - System health
+- /analyze - Code analysis  
+- /build agent Monitor - Create agent
+
+**💬 Natural Language**
+- "Can you fix for me?"
+- "Build an agent named TestBot for simple ping responses"
+- "Give me a game plan to fix the buildcompleteagent method"
+- "Analyze system performance"
+- "Create a Discord bot for monitoring"
+
+**⚡ Quick Commands**
+- "approve" - Execute pending modifications
+- "undo last" - Reverse last change
+- "show status" - System overview
+
+**🎯 Capabilities**
+- **Analysis:** Code health, performance, architecture review
+- **Building:** Agents, integrations, system components  
+- **Modification:** Code changes, configuration updates
+- **Configuration:** System settings, environment setup
+
+**🚨 High-Risk Operations**
+Some operations require approval for safety:
+- File deletions or major structural changes
+- Production/main branch modifications
+- Critical system component changes
+
+Organized, well-documented, and ready to accelerate development.`;
+  }
+
+  private async getSystemStatus(): Promise<string> {
+    try {
+      const statusRequest: ArchitecturalRequest = {
+        type: 'system-status',
+        description: 'System health check',
+        userId: 'system',
+        priority: 'medium',
+        riskLevel: 'low'
+      };
+      
+      return await this.orchestrator.executeArchitecturalWork(statusRequest);
+    } catch (error) {
+      return `System status check failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
-
-    const request = {
-      type: 'code-analysis' as const,
-      description: `Analyze ${target}`,
-      target,
-      priority: 'medium' as const,
-      riskLevel: 'low' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
   }
 
-  private async handleBuild(description: string): Promise<string> {
-    if (!description.trim()) {
-      return await this.voice.formatResponse("Please specify what to build. Examples:\n• `/build agent named Monitor`\n• `/build discord bot for Dashboard`", { type: 'error' });
+  private getPendingApprovals(userId: string): string {
+    const pending = this.pendingApprovals.get(userId);
+    
+    if (!pending) {
+      return "No pending approvals.";
     }
+    
+    return `**Pending Approval:**
+**Request:** ${pending.description}
+**Type:** ${pending.type}
+**Risk Level:** ${pending.riskLevel}
 
-    const request = {
-      type: 'agent-creation' as const,
-      description: `Build ${description}`,
-      priority: 'medium' as const,
-      riskLevel: 'medium' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
-  }
-
-  private async handleModify(description: string): Promise<string> {
-    if (!description.trim()) {
-      return await this.voice.formatResponse("Please specify what to modify. Examples:\n• `/modify increase response length`\n• `/modify commander voice settings`", { type: 'error' });
-    }
-
-    const request = {
-      type: 'system-modification' as const,
-      description,
-      priority: 'medium' as const,
-      riskLevel: 'medium' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
-  }
-
-  private async handleConfig(query: string): Promise<string> {
-    if (!query.trim()) {
-      return await this.voice.formatResponse("Configuration overview:\n• Use `/config [component]` to view specific settings\n• Use `/intelligence [query]` for smart config queries", { type: 'help' });
-    }
-
-    // Route config queries through intelligence
-    return await this.handleIntelligence(`configuration: ${query}`);
-  }
-
-  private async handleIntelligence(query: string): Promise<string> {
-    if (!query.trim()) {
-      return await this.voice.formatResponse("Smart queries help you understand your codebase:\n• `What's Commander's token limit?`\n• `Show Discord configuration`\n• `How does feedback learning work?`", { type: 'help' });
-    }
-
-    return await this.intelligence.processQuery(query);
-  }
-
-  private async handleUndo(): Promise<string> {
-    const request = {
-      type: 'system-modification' as const,
-      description: 'undo last modification',
-      priority: 'high' as const,
-      riskLevel: 'low' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
-  }
-
-  private async showHistory(): Promise<string> {
-    const request = {
-      type: 'system-modification' as const,
-      description: 'show modification history',
-      priority: 'low' as const,
-      riskLevel: 'low' as const
-    };
-
-    return await this.orchestrator.executeArchitecturalWork(request);
+Reply with "approve" to execute or provide more details to refine.`;
   }
 }
